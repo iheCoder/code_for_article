@@ -132,13 +132,17 @@ func benchmarkHybridSort(b *testing.B, threshold int, dataSize int, dataType str
 // 针对不同阈值和数据类型的具体基准测试
 
 // --- 随机数据 ---
-func BenchmarkHybridSort_Rand_T4_N1000(b *testing.B)  { benchmarkHybridSort(b, 4, 1000, "random") }
-func BenchmarkHybridSort_Rand_T8_N1000(b *testing.B)  { benchmarkHybridSort(b, 8, 1000, "random") }
-func BenchmarkHybridSort_Rand_T16_N1000(b *testing.B) { benchmarkHybridSort(b, 16, 1000, "random") }
-func BenchmarkHybridSort_Rand_T24_N1000(b *testing.B) { benchmarkHybridSort(b, 24, 1000, "random") }
-func BenchmarkHybridSort_Rand_T32_N1000(b *testing.B) { benchmarkHybridSort(b, 32, 1000, "random") }
-func BenchmarkHybridSort_Rand_T48_N1000(b *testing.B) { benchmarkHybridSort(b, 48, 1000, "random") }
-func BenchmarkHybridSort_Rand_T64_N1000(b *testing.B) { benchmarkHybridSort(b, 64, 1000, "random") }
+func BenchmarkHybridSort_Rand_T4_N1000(b *testing.B)   { benchmarkHybridSort(b, 4, 1000, "random") }
+func BenchmarkHybridSort_Rand_T8_N1000(b *testing.B)   { benchmarkHybridSort(b, 8, 1000, "random") }
+func BenchmarkHybridSort_Rand_T16_N1000(b *testing.B)  { benchmarkHybridSort(b, 16, 1000, "random") }
+func BenchmarkHybridSort_Rand_T24_N1000(b *testing.B)  { benchmarkHybridSort(b, 24, 1000, "random") }
+func BenchmarkHybridSort_Rand_T32_N1000(b *testing.B)  { benchmarkHybridSort(b, 32, 1000, "random") }
+func BenchmarkHybridSort_Rand_T48_N1000(b *testing.B)  { benchmarkHybridSort(b, 48, 1000, "random") }
+func BenchmarkHybridSort_Rand_T64_N1000(b *testing.B)  { benchmarkHybridSort(b, 64, 1000, "random") }
+func BenchmarkHybridSort_Rand_T128_N1000(b *testing.B) { benchmarkHybridSort(b, 128, 1000, "random") }
+func BenchmarkHybridSort_Rand_T256_N1000(b *testing.B) { benchmarkHybridSort(b, 256, 1000, "random") }
+func BenchmarkHybridSort_Rand_T96_N1000(b *testing.B)  { benchmarkHybridSort(b, 96, 1000, "random") }
+func BenchmarkHybridSort_Rand_T192_N1000(b *testing.B) { benchmarkHybridSort(b, 192, 1000, "random") }
 
 // --- 近乎有序数据 ---
 func BenchmarkHybridSort_NearlySorted_T4_N1000(b *testing.B) {
@@ -155,6 +159,20 @@ func BenchmarkHybridSort_NearlySorted_T32_N1000(b *testing.B) {
 }
 func BenchmarkHybridSort_NearlySorted_T64_N1000(b *testing.B) {
 	benchmarkHybridSort(b, 64, 1000, "nearlySorted")
+}
+
+// --- 近乎有序数据 (更大阈值) ---
+func BenchmarkHybridSort_NearlySorted_T96_N1000(b *testing.B) {
+	benchmarkHybridSort(b, 96, 1000, "nearlySorted")
+}
+func BenchmarkHybridSort_NearlySorted_T128_N1000(b *testing.B) {
+	benchmarkHybridSort(b, 128, 1000, "nearlySorted")
+}
+func BenchmarkHybridSort_NearlySorted_T192_N1000(b *testing.B) {
+	benchmarkHybridSort(b, 192, 1000, "nearlySorted")
+}
+func BenchmarkHybridSort_NearlySorted_T256_N1000(b *testing.B) {
+	benchmarkHybridSort(b, 256, 1000, "nearlySorted")
 }
 
 // 为了比较，我们也可以加入纯粹的快速排序和插入排序的基准测试（针对小数组）
