@@ -1,4 +1,4 @@
-package perf_optimize_but_lower
+package optimized_for_nothing
 
 import (
 	"sync"
