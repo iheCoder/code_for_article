@@ -28,7 +28,12 @@ func dotProductSIMD(a, b []float64) float64 {
 	return sum
 }
 
-// 版本 C：混用 GPR + SIMD 临时变量，模拟寄存器压力
+// 版本 C：汇编 SIMD 实现
+//
+//go:noescape
+func DotProductASM(a, b []float64) float64
+
+// 版本 D：混用 GPR + SIMD 临时变量，模拟寄存器压力
 func dotProductGPR_SIMD_Mix(a, b []float64, scalar float64) float64 {
 	var sum float64
 	n := len(a)
@@ -111,4 +116,53 @@ func BenchmarkDotProductSIMD_BySize(b *testing.B) {
 		})
 	}
 	globalResult = r // Assign to globalResult
+}
+
+// BenchmarkDotProductASM_BySize benchmarks the DotProductASM function (assembly implementation) across various input sizes.
+func BenchmarkDotProductASM_BySize(b *testing.B) {
+	var r float64 // Local variable to store result
+	for _, size := range benchmarkTestSizes {
+		aVec := generateFloat64Slice(size)
+		bVec := generateFloat64Slice(size)
+
+		b.Run(fmt.Sprintf("ASM_size_%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				r = DotProductASM(aVec, bVec)
+			}
+		})
+	}
+	globalResult = r // Assign to globalResult
+}
+
+// BenchmarkCompareAllMethods directly compares all three implementations for key sizes
+func BenchmarkCompareAllMethods(b *testing.B) {
+	// 选择有代表性的大小进行对比
+	compareSizes := []int{4, 8, 16, 64, 256, 1024, 4096}
+	var r float64
+
+	for _, size := range compareSizes {
+		aVec := generateFloat64Slice(size)
+		bVec := generateFloat64Slice(size)
+
+		b.Run(fmt.Sprintf("Size_%d/GPR", size), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				r = dotProductGPR(aVec, bVec)
+			}
+		})
+
+		b.Run(fmt.Sprintf("Size_%d/SIMD_Go", size), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				r = dotProductSIMD(aVec, bVec)
+			}
+		})
+
+		b.Run(fmt.Sprintf("Size_%d/SIMD_ASM", size), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				r = DotProductASM(aVec, bVec)
+			}
+		})
+	}
+	globalResult = r
 }
