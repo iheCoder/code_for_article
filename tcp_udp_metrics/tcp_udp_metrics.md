@@ -8,6 +8,90 @@
 
 TCP (Transmission Control Protocol) 是面向连接的、可靠的传输层协议，其状态管理和资源分配对应用性能至关重要。
 
+### TCP 连接状态转换与指标关联
+
+理解 TCP 连接的生命周期对于解读各项指标至关重要。以下是典型的 TCP 状态转换以及相关指标的产生时机：
+
+**A. 连接建立过程 (客户端主动发起)**
+
+1.  **CLOSED -> SYN_SENT (客户端)**:
+    *   客户端应用发起连接请求。
+    *   `ActiveOpens`: 客户端累积计数增加。
+    *   `tcp_allocated_sockets`: 内核为此尝试分配套接字。
+    *   如果目标不可达或立即拒绝，`AttemptFails` 可能增加。
+
+2.  **CLOSED -> LISTEN (服务器端)**:
+    *   服务器应用监听特定端口，准备接受连接。
+    *   套接字处于 LISTEN 状态。
+
+3.  **LISTEN -> SYN_RECV (服务器端)**:
+    *   服务器收到客户端的 SYN 包。
+    *   `PassiveOpens`: 服务器累积计数增加。
+    *   连接进入 SYN 队列（半连接队列）。
+    *   `tcp_allocated_sockets`: 包含这些半连接套接字。
+    *   如果 SYN 队列满，可能导致 `ListenOverflows` (或 `ListenDrops`, `TCPBacklogDrop` 中与 SYN 队列相关的部分) 增加，新 SYN 包被丢弃。
+    *   大量连接停滞在此状态可能表明 SYN Flood 攻击或客户端无法收到 SYN+ACK。
+
+4.  **SYN_SENT -> ESTABLISHED (客户端)** / **SYN_RECV -> ESTABLISHED (服务器端)**:
+    *   客户端收到服务器的 SYN+ACK 并发送最终的 ACK；服务器收到最终的 ACK。三次握手完成。
+    *   连接从 SYN 队列（服务器端）移至 Accept 队列（服务器端），等待应用 `accept()`。
+    *   如果 Accept 队列满，可能导致 `ListenOverflows` (或 `TCPBacklogDrop` 中与 Accept 队列相关的部分) 增加，已完成握手的连接被丢弃。
+    *   一旦应用 `accept()` (服务器端) 或连接调用返回成功 (客户端)：
+        *   `tcp_established_count` (或 `tcp_inuse`, `CurrEstab`): 增加。
+        *   此时连接处于数据传输阶段。
+        *   `RetransSegs`, `TCPTimeouts`, `InErrs`: 在此阶段可能因网络问题或数据损坏而增加。
+
+**B. 连接关闭过程**
+
+*   **主动关闭方 (例如，客户端先调用 `close()`)**:
+
+    1.  **ESTABLISHED -> FIN_WAIT_1**:
+        *   主动关闭方发送 FIN。
+        *   `tcp_allocated_sockets`: 仍然包含此套接字。
+        *   如果应用在 `close()` 前异常退出，此套接字可能成为孤儿 (`TCPOrphanSockets`)。
+
+    2.  **FIN_WAIT_1 -> FIN_WAIT_2**:
+        *   收到对端对 FIN 的 ACK。
+        *   等待对端的 FIN。
+        *   `net.ipv4.tcp_fin_timeout`: 控制此状态的超时。过多的 FIN_WAIT_2 连接可能与此超时或对端行为有关。
+
+    3.  **FIN_WAIT_2 -> TIME_WAIT**:
+        *   收到对端的 FIN，并发送 ACK。
+        *   `tcp_time_wait_count`: 增加。
+        *   `tcp_allocated_sockets`: 仍然包含此套接字。
+        *   此状态持续 2*MSL 时间，以确保连接可靠关闭和处理延迟报文。`net.ipv4.tcp_tw_reuse` 和 `net.ipv4.tcp_tw_recycle` (慎用) 在此阶段相关。
+
+    4.  **TIME_WAIT -> CLOSED**:
+        *   超时后，套接字被释放。
+        *   `tcp_time_wait_count`: 减少。
+        *   `tcp_allocated_sockets`: 减少。
+
+*   **被动关闭方 (例如，服务器响应客户端的关闭请求)**:
+
+    1.  **ESTABLISHED -> CLOSE_WAIT**:
+        *   收到主动关闭方的 FIN，并回复 ACK。
+        *   此时内核已处理了对端的关闭，等待本地应用调用 `close()`。
+        *   `tcp_allocated_sockets`: 仍然包含此套接字。
+        *   **关键点**：如果应用不调用 `close()`，连接将一直停留在 CLOSE_WAIT 状态，导致资源泄露。大量的 CLOSE_WAIT 连接通常是应用 bug。
+
+    2.  **CLOSE_WAIT -> LAST_ACK**:
+        *   本地应用调用 `close()`，内核发送 FIN 给对端。
+        *   等待对端对这个 FIN 的 ACK。
+
+    3.  **LAST_ACK -> CLOSED**:
+        *   收到对端 ACK 后，套接字被释放。
+        *   `tcp_allocated_sockets`: 减少。
+
+**C. 其他情况**
+
+*   **连接重置 (`EstabResets`, `OutRsts`)**:
+    *   连接可能在任何阶段（尤其是 ESTABLISHED）因错误、应用逻辑或 RST 包而被重置，直接进入 CLOSED 状态。
+
+**总结**
+
+*   `tcp_allocated_sockets` 是一个总和，包含了处于各种非 CLOSED 状态（LISTEN, SYN_SENT, SYN_RECV, ESTABLISHED, FIN_WAIT_1, FIN_WAIT_2, CLOSE_WAIT, LAST_ACK, TIME_WAIT）的套接字。
+*   通过对比不同状态的连接数，结合 `ActiveOpens`, `PassiveOpens`, `ListenOverflows`, `RetransSegs` 等指标，可以更准确地定位网络瓶颈或应用问题。
+
 ### 1. TCP TIME_WAIT 状态 (`tcp_time_wait_count`)
 
 #### 定义与含义
