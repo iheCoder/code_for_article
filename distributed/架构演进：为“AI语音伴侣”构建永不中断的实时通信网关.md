@@ -8,7 +8,9 @@
 
 ## 第一阶段：实现基础的分布式路由
 
-想象一下，用户 A 的 WebSocket 连接被负载均衡到了服务器 **Pod A**。当后端的 AI 大脑生成一句回复后，它该如何准确地将这句回复通过网关集群，发送给正连接在 **Pod A** 上的用户 A 呢？
+想象一下，用户 A 的 WebSocket 连接被负载均衡到了服务器 **Pod A**。用户通过这个连接发送的语音或文本消息，并不会由网关直接处理，而是被投递到一个**消息队列（如 Kafka 或 RabbitMQ）**中。后端一系列复杂的处理服务（如 ASR 语音识别、NLP 理解、AI 大脑决策）构成了一个**处理链**，它们消费队列中的消息并协同工作。
+
+当处理链最终生成一句回复后，它面临一个问题：这句回复该如何准确地通过网关集群，发送给正连接在 **Pod A** 上的用户 A 呢？处理链本身是无状态的，它不知道用户具体连接在哪一个网关实例上。
 
 ### 方案：基于 Redis 的服务注册与发现
 
@@ -17,8 +19,8 @@
 **详细说明：**
 
 1.  **注册**：当一个客户端与 `Pod-A` (IP: `10.0.0.1`) 建立连接后，`Pod-A` 会立即向 Redis 写入一条记录，例如 `SET session:Sess-abc-123 "10.0.0.1"`。这个 `session_id` 在会话期间是唯一的。
-2.  **查询**：当 `AIService` 需要向这个会话发送消息时，它首先向 Redis 查询 `GET session:Sess-abc-123`，得到 `Pod-A` 的 IP 地址 `10.0.0.1`。
-3.  **推送**：`AIService` 直接向 `10.0.0.1` 发起请求，`Pod-A` 收到请求后，从其内存中的连接列表里找到 `Sess-abc-123` 对应的 WebSocket 连接，并将消息推送出去。
+2.  **查询**：当**后端回调服务**（处理链的最后一环）需要向这个会话发送消息时，它首先向 Redis 查询 `GET session:Sess-abc-123`，得到 `Pod-A` 的 IP 地址 `10.0.0.1`。
+3.  **推送**：**回调服务**直接向 `10.0.0.1` 发起请求，`Pod-A` 收到请求后，从其内存中的连接列表里找到 `Sess-abc-123` 对应的 WebSocket 连接，并将消息推送出去。
 
 #### 流程图
 
@@ -26,21 +28,29 @@
 sequenceDiagram
     participant Client as 客户端
     participant PodA as RTC-Gateway 实例 A
+    participant MQ as 消息队列
+    participant Backend as 后端处理链
     participant Redis as Redis 集群
-    participant AIService as AI 服务
+    participant CallbackSvc as 回调服务
 
     Client->>PodA: 1. 建立 WebSocket 连接
     activate PodA
-    PodA->>Redis: 2. 注册路由信息 (session_id -> pod_a_ip)
+    PodA->>Redis: 2. 注册路由 (session_id -> pod_a_ip)
     PodA-->>Client: 连接成功
     deactivate PodA
 
-    AIService->>Redis: 3. 根据 session_id 查询路由
-    Redis-->>AIService: 返回 Pod A 的 IP
-    
-    AIService->>PodA: 4. 定向回调
+    Client->>PodA: 发送业务消息
+    PodA->>MQ: 3. 消息入队
+
+    Backend->>MQ: 消费消息并处理
+    Backend->>CallbackSvc: 生成回复
+
+    CallbackSvc->>Redis: 4. 根据 session_id 查询路由
+    Redis-->>CallbackSvc: 返回 Pod A 的 IP
+
+    CallbackSvc->>PodA: 5. 定向回调
     activate PodA
-    PodA->>Client: 5. 推送 AI 回复
+    PodA->>Client: 6. 推送 AI 回复
     deactivate PodA
 ```
 
