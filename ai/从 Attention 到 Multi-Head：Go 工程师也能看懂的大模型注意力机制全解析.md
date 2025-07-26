@@ -59,39 +59,39 @@
 ```mermaid
 graph TD
     subgraph "输入 (Input)"
-        I[Input Sequence: "The cat sat..."]
+        I[Input Sequence: The cat sat...]
     end
 
     subgraph "1. 生成 Q, K, V 向量"
-        I --> Q[Query: "sat"]
-        I --> K[Keys: "The", "cat", "on", "mat"]
-        I --> V[Values: "The", "cat", "on", "mat"]
+        I --> Q[Query: sat]
+        I --> K[Keys: The, cat, on, mat]
+        I --> V[Values: The, cat, on, mat]
     end
 
-    subgraph "2. 计算注意力"
-        Q -- 点积 --> S1("Score(Q, K_the)")
-        Q -- 点积 --> S2("Score(Q, K_cat)")
-        Q -- 点
+subgraph "2. 计算注意力"
+Q -- 点积 --> S1("Score(Q, K_the)")
+Q -- 点积 --> S2("Score(Q, K_cat)")
+Q -- 点
         积 --> S3("...")
-        K -- 点积 --> S1 & S2 & S3
+K -- 点积 --> S1 & S2 & S3
 
-        subgraph "计算分数 (Score)"
-            S1 & S2 & S3
-        end
+subgraph "计算分数 (Score)"
+S1 & S2 & S3
+end
 
-        S[Scores] --> Softmax[Softmax 函数]
-        Softmax --> W[Weights (注意力权重)]
+S[Scores] --> Softmax[Softmax 函数]
+Softmax --> W[Weights（注意力权重）]
 
-        V -- 加权 --> O[Output Vector]
-        W -- 求和 --> O
-    end
+V -- 加权 --> O[Output Vector]
+W -- 求和 --> O
+end
 
-    subgraph "3. 输出"
-        O --> Final_Output["上下文感知的'sat'向量"]
-    end
+subgraph "3. 输出"
+O --> Final_Output["上下文感知的'sat'向量"]
+end
 
-    style I fill:#f9f,stroke:#333,stroke-width:2px
-    style O fill:#ccf,stroke:#333,stroke-width:2px
+style I fill:#f9f,stroke:#333,stroke-width:2px
+style O fill:#ccf,stroke:#333,stroke-width:2px
 ```
 
 
@@ -155,7 +155,7 @@ graph TD
     Head2_QKV --> Attention2[Attention 计算 2]
     HeadN_QKV --> AttentionN[Attention 计算 N]
 
-    Attention1 --> Concat[拼接 (Concatenate)]
+    Attention1 --> Concat[拼接 Concatenate]
     Attention2 --> Concat
     AttentionN --> Concat
 
@@ -210,6 +210,135 @@ graph TD
 
 
 
+## 第六章：多头注意力的内部“解剖”
+
+Multi-Head Attention（MHA）究竟在内部做了些什么？如果把 **Self-Attention** 看作一次 SQL 查询，那 MHA 就像是给同一张表建立了多张索引，每一张索引关注不同的列（特征子空间）。
+
+1. **线性映射切分维度**：假设隐藏维度为 $d_{model}=768$，我们想要 12 个头，每个头的维度就是 $d_{head}=64$。通过三个独立的全连接层把输入 $X$ 投影成 $Q,K,V \in \mathbb{R}^{n\times d_{model}}$，再 reshape 成 $\mathbb{R}^{n\times h \times d_{head}}$。
+2. **并行计算注意力**：GPU 会在 batch 维度上 launch kernel，一次性完成 12 个头的点积、Softmax 和加权求和。
+3. **Concat + Linear**：把所有头的输出按最后一个维度拼接回 $\mathbb{R}^{n\times d_{model}}$，再经过一个线性层；这一层常被解释为“信息重混（Output Projection）”。
+
+```mermaid
+flowchart LR
+    subgraph Head["Head i (64D)"]
+        Qi[Qi] --> Attn[Scaled Dot-Product]
+        Ki[Ki] --> Attn
+        Vi[Vi] -.-> Outi[Oi]
+    end
+    X[输入 X] -->|Wq,Wk,Wv| SplitHeads[切分 12 个头]
+    SplitHeads --> Head
+    Head -->|concat| Concat[拼接]
+    Concat -->|Wo| Final[输出]
+```
+
+> ⚙️ **工程师视角**：在 HuggingFace Transformers 中，`nn.Linear` 用 `in_features=d_model, out_features=d_model*3` 一次性产出 Q、K、V，然后再 `view(batch, seq_len, n_head, head_dim)`。
+
+---
+
+## 第七章：头太多还是太少？——从显存到效果的全局权衡
+
+| 头数        | 优点                         | 缺点                                     |
+| ----------- | ---------------------------- | ---------------------------------------- |
+| 少（如 4）  | 显存占用小，推理更快         | 表征能力有限，可能捕捉不到复杂关系       |
+| 多（如 32） | 视角丰富，提升收敛速度与效果 | 显存占用指数增加，带宽瓶颈，训练 cost 高 |
+
+1. **显存公式（简化）**：$Memory \propto h \times seq \times d_{head}$。当序列长、头数多时，KV Cache 可能比模型参数还大。
+2. **经验法则**：$d_{model} = h \times d_{head}$，保持 $d_{head}$ 介于 32-128 通常最稳妥；超过 128 可能 under-utilize GPU tensor cores。
+3. **搜索头数**：在工业界常通过 *神经架构搜索*（NAS）或 *sparsity regularization* 找到冗余头，再做 **Head Pruning**。
+
+> 🛠️ **实战 Tip**：若训练过程中 GPU OOM，可先减少头数再缩短序列；因为缩头对效果影响通常比截断序列小。
+
+---
+
+## 第八章：“闪电”注意力：FlashAttention 的 GPU 性能黑科技
+
+FlashAttention 通过 **Re-ordering + Tiling + Recomputation** 把原本 O(n²) 内存访问、O(n²) 计算的注意力 kernel 优化到 **显存 O(n) 访存、计算几乎无损**。
+
+核心思想：
+
+1. **Block Tiling**：把 Q、K、V 分块放入 GPU SRAM（L2/L1 cache），避免重复读取全序列。
+2. **On-Chip Softmax**：分块计算局部最大值与和，在寄存器中归一化，最后合并。
+3. **Recompute Trick**：向后传播时不保留完整注意力矩阵，而是 on-the-fly 重新计算局部块，节约显存换算力。
+
+```mermaid
+graph TB
+    subgraph GPU_SRAM
+        Qb[Q Block] -- dot --> Score
+        Kb[K Block] -- dot --> Score
+        Score -- softmax --> Prob
+        Prob -- matmul --> Vb[V Block]
+    end
+    DRAM --load--> Qb & Kb & Vb
+```
+
+> 🚀 **收益**：在 A100 上序列长度 2K 时，训练吞吐可提升 2-4×，显存下降 50-60%。PyTorch 2.x 已内置 `torch.nn.functional.scaled_dot_product_attention` 调用。
+
+---
+
+## 第九章：KV-Cache 再优化——Multi-Query 与 Grouped-Key 实战
+
+### 9.1 Multi-Query Attention（MQA）
+
+MQA 让 **所有头共享同一个 Key/Value**，只保留独立 Query。显存从 $h\times seq \times d_{head}$ 减到 $seq \times d_{head}$。
+
+- 多用于推理；训练阶段因信息瓶颈对效果有轻微负面。
+- 典型模型：OpenAI text-ada-002；Google PaLM v2 Decoder。
+
+### 9.2 Grouped-Query Attention（GQA）
+
+介于 MHA 与 MQA 之间：将头分组，每组共享一份 K/V。设组数 g，则显存系数 $\frac{h}{g}$。
+
+- ChatGPT-turbo、Llama-2 使用 g≈8-16 获得良好平衡。
+
+```mermaid
+flowchart LR
+    subgraph Heads
+        Q1[Q1] -->|share K/V| G1
+        Q2[Q2] --> G1
+        Q3[Q3] -->|share K/V| G2
+        Q4[Q4] --> G2
+    end
+    style G1 stroke:#f66,stroke-width:2px
+    style G2 stroke:#6f6,stroke-width:2px
+```
+
+> 💡 **实战数据**：在 16-B GPU 上，采用 GQA 组数 8，可将 4K context 的 KV Cache 从 6 GB 压到 0.8 GB，并保持 bleu/rouge 损失 <1%。
+
+---
+
+## 第十章：可观测性——如何评估、可视化和裁剪无用 Attention 头
+
+1. **Attention Map 热力图**：`seaborn.heatmap(weights)` 直观展示不同 token 之间的依赖强度。
+2. **熵（Entropy）指标**：对每个头计算 softmax 权重的熵，熵高表示分布均匀（信息量低）。
+3. **Sensitivity Analysis**：把某个头置零，观察验证集损失或 rouge 变化；若无显著恶化即可裁剪。
+4. **L0/L1 Regularization**：训练阶段对每个头引入稀疏化惩罚，让模型自动“关闭”冗余头。
+
+```python
+# PyTorch 简易头裁剪示例
+for name, module in model.named_modules():
+    if isinstance(module, nn.MultiheadAttention):
+        important_heads = pick_topk(module.attn_entropy, k=8)
+        module.prune_heads(set(range(module.num_heads)) - important_heads)
+```
+
+> 📊 **监控平台**：Open-sourced `tensorboard-plugins/profiler` or `weights & biases` 可实时追踪注意力分布演变。
+
+---
+
+## 第十一章：Attention 的未来——State-Space 与 Hyena 正在逼近？
+
+近期研究表明，**State-Space Models (SSM)** 与 **Hyena** 等长序列算子有望以 O(n) 甚至 O(log n) 复杂度替代部分注意力：
+
+| 方法        | 复杂度     | 亮点                                | 挑战                          |
+| ----------- | ---------- | ----------------------------------- | ----------------------------- |
+| S4 / Mamba  | O(n)       | 串行递推，与 RNN 类似；擅长超长序列 | 并行度低，硬件友好度需提升    |
+| Hyena       | O(n log n) | 用卷积核近似长程相关；FFT 加速      | 还未完全超过 Transformer SOTA |
+| Mega / RWKV | O(n)       | 将门控与稀疏注意力结合              | 生态仍不成熟                  |
+
+> 🔭 **趋势洞察**：未来工业界或将出现“Hybrid Transformer”，在短依赖使用 FlashAttention，在长依赖使用 SSM/Conv 算子，实现 **Compute-Aware Routing**。
+
+---
+
 ## 结论
 
 
@@ -222,4 +351,3 @@ graph TD
 4. **KV 缓存是性能关键**: 对于我们程序员来说，理解 KV 缓存尤为重要。它是一个简单而高效的工程优化，是让大模型能够在你我面前流畅对话的关键所在。
 
 希望这篇博客能帮你揭开注意力机制的神秘面纱。当你下一次和 AI 对话，或是看到某个 AI 项目宣称支持更长的“上下文窗口”时，你就能会心一笑，因为你已经洞悉了它背后最核心的技术原理和性能关键。
-
