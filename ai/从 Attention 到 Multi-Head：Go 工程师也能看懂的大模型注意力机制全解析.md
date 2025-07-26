@@ -246,7 +246,7 @@ graph TD
     end
 
     subgraph "4. 拼接与融合"
-        Output_heads --> Concat["拼接 oncatenate"]
+        Output_heads --> Concat[拼接 Concatenate]
         Concat --> Final_Linear["最终线性层 信息融合"]
         Final_Linear --> Final_Output[最终输出 n x d_model]
     end
@@ -372,7 +372,153 @@ graph TD
 
 
 
-## 第九章：未来展望：Attention 的继任者们？
+## 第九章：Cross-/Memory-/Sparse Attention：三把扩展之钥
+
+这一章我们引入三种在工业界非常常见、且与自注意力（Self-Attention）并列的重要机制：**Cross-Attention**、**Memory-Attention** 与 **Sparse-Attention**。它们分别解决“多源对齐”“长程记忆”与“平方复杂度”的现实问题。
+
+### 9.1 Cross-Attention（交叉注意力）
+**场景**：编码器-解码器（Encoder–Decoder）架构（如 T5/BART）或 RAG 等检索增强场景。
+
+- **定义**：Query 来自解码端隐状态（当前生成位置），Key/Value 来自外部源（编码端输出、检索文档、工具返回等）。
+- **形状与公式**：
+  - 设解码端隐状态 $H_{dec} \in \mathbb{R}^{B\times L_t\times d_{model}}$，编码端输出 $H_{enc} \in \mathbb{R}^{B\times L_s\times d_{model}}$。
+  - 线性映射：
+    $$
+    Q = H_{dec} W_Q^{dec},\quad K = H_{enc} W_K^{enc},\quad V = H_{enc} W_V^{enc}
+    $$
+  - 计算注意力：
+    $$
+    \text{Attn}(Q,K,V) = \text{Softmax}\!\left(\frac{QK^\top}{\sqrt{d_{head}}}\right) V
+    $$
+- **直觉类比（Go）**：解码器像是你的“业务服务”，向“搜索服务/知识库”（编码器输出或检索结果）发查询；Q 是业务问题，K/V 是知识库的索引与条目内容。
+
+> 在 **ChatGPT + 检索** 流程中，检索到的文档被编码为向量，作为 K/V；当前的对话状态提供 Q，通过 Cross-Attention 将外部知识融入生成过程。
+
+
+### 9.2 Memory-Attention（记忆注意力）
+**目标**：在不显著增加计算量的前提下，建立 **长时依赖**。
+
+常见两类做法：
+
+1) **段级记忆（Transformer-XL 思路）**：
+   - 把长序列切成若干段。对第 $t$ 段计算时，把上段的 **Key/Value** 作为只读 **Memory** 拼接在当前段的 K/V 前面（梯度不回传到旧段）。
+   - 公式化：
+     $$
+     K_t' = [\text{SG}(K_{t-1}),\ K_t],\quad V_t' = [\text{SG}(V_{t-1}),\ V_t]
+     $$
+     其中 SG 是 stop-gradient，确保旧记忆不被更新。
+   - **掩码**：仍使用因果掩码，禁止“看见未来”。
+
+2) **外部/检索记忆（KNN-LM / Memorizing Transformer / RAG）**：
+   - 维护一个向量库（长期记忆），按需检索相似向量并作为 **额外 K/V** 拼接；解码端对其做 Cross-Attention。
+
+**Go 类比**：把上一批任务的只读快照（memory）加入到本批计算中；或在运行中查询一个外部只读 KV 存储，并在注意力阶段将其“并联进来”。
+
+Mermaid 图（段级记忆）：
+```mermaid
+flowchart LR
+    subgraph Prev[上一段]
+        Kprev["K_{t-1}"] --> MemK
+        Vprev["V_{t-1}"] --> MemV
+    end
+    subgraph Curr[当前段]
+        Kt["K_t"] --> CatK["Concat => K_t' = [SG(K_{t-1}), K_t]"]
+        Vt["V_t"] --> CatV["Concat => V_t' = [SG(V_{t-1}), V_t]"]
+    end
+    MemK --> CatK
+    MemV --> CatV
+    CatK --> Attn[Self-Attention with Causal Mask]
+    CatV --> Attn
+```
+
+### 9.3 Sparse-Attention（稀疏注意力）
+**问题**：全连接注意力是 $\mathcal{O}(n^2)$。
+
+**思路**：把“每个 token 都看所有位置”改成“**局部 + 少量全局/随机** 的图连接”，复杂度接近 $\mathcal{O}(n\cdot w)$ 或 $\mathcal{O}(n)$。
+
+常见图样：
+- **滑动窗口（Local/Sliding Window）**：每个位置只看前后 $w$ 个 token。
+- **全局标记（Global Tokens）**：少数“汇总”token（如 CLS）与全体互联。
+- **随机/块稀疏（Random/Block Sparse）**：注入少量随机或分块跨越连接，保证可达性与表达力（如 BigBird/Longformer）。
+
+简单示意：
+```mermaid
+flowchart TB
+    subgraph Local[滑动窗口]
+        A1 --- A2 --- A3 --- A4 --- A5
+    end
+    subgraph Global[全局标记]
+        G((G)) --- B1
+        G --- B2
+        G --- B3
+        B1 --- B2 --- B3 --- B4
+    end
+    subgraph Block[块+随机]
+        C1 --block--> C2
+        C2 --block--> C3
+        C1 -.random.-> C3
+        C2 -.random.-> C4
+    end
+```
+
+**工程权衡**：
+- 局部窗口 $w$ 越大，信息流越畅通但显存/算力越高；
+- 少量全局/随机边能显著提升可达性与理论表达力，同时保持线性/近线性复杂度。
+
+
+## 第十章：以 ChatGPT 对话为例：从一个提问到连续生成的整个流水线
+
+下面用一个具体对话片段串起 **自注意力、因果掩码、KV 缓存、（可选）Cross-Attention/RAG** 的全流程。
+
+> **用户**："用 Go 写一个最小的 HTTP 服务器，并解释每行代码。"
+
+### 10.1 第一步：分词与嵌入
+- 文本被分成 token 序列 $x_{1:L}$。
+- 查表得到词向量并加上位置编码（常见为 **RoPE** 旋转位置编码）。对每一层的 Q/K 应用旋转：
+  $$
+  \text{RoPE}(q_m) = R_m \cdot q_m,\quad \text{RoPE}(k_m) = R_m \cdot k_m
+  $$
+  其中 $R_m$ 是按频率构造的二维旋转块对角矩阵（不同维度频率不同）。
+
+### 10.2 第二步：逐层计算（以一层为例）
+1) 线性映射并 reshape：
+$$
+Q = X W_Q,\ K = X W_K,\ V = X W_V \;\Rightarrow\; [B,L,h,d_{head}]
+$$
+2) **因果掩码（Causal Mask）**：对未来位置 $j>i$ 的得分置为 $-\infty$：
+$$
+S_{ij} = \begin{cases}
+  \frac{q_i k_j^\top}{\sqrt{d_{head}}}, & j \le i \\
+  -\infty, & j>i
+\end{cases}
+$$
+3) **数值稳定 Softmax**：
+$$
+\text{Softmax}(s_i) = \frac{\exp(s_i-\max(s_i))}{\sum_j \exp(s_j-\max(s_i))}
+$$
+4) 权重与加权和： $P=\text{Softmax}(S),\ Y = P V$。
+5) 残差 + 前馈（MLP）+ LayerNorm，得到该层输出，层层堆叠。
+
+### 10.3 第三步：自回归生成与 KV 缓存
+- 第一个生成步（例如要生成第 $L+1$ 个 token），会把历史 token 的 K/V **写入 KV-Cache**：
+  ```text
+  cache.K[layer][1:L], cache.V[layer][1:L]
+  ```
+- 之后每一步只需：
+  1) 计算新 token 的 $q_{L+t}$；
+  2) 与缓存的 K 做点积，免去历史 K/V 的重复计算；
+  3) 更新缓存：追加 $k_{L+t}, v_{L+t}$。
+
+### 10.4 第四步：（可选）检索增强 Cross-Attention
+- 如果系统触发检索/工具调用，取回文档向量作为外部 **K/V**；
+- 当前对话隐状态产出 **Q**，对外部 K/V 做一次 Cross-Attention，把外部知识融合进解码。
+
+### 10.5 第五步：采样与流式输出
+- 线性层 + logits；按 **temperature**、**top-p** 等策略采样下一个 token；
+- 通过流（SSE/HTTP chunk）把新 token 持续推给客户端，形成你熟悉的“逐字打印”。
+
+
+## 第十一章：未来展望：Attention 的继任者们？
 
 
 
