@@ -3,7 +3,7 @@ package rete
 import (
 	"sync"
 
-	"github.com/ihewe/code_for_article/ruleengine/model"
+	"code_for_article/ruleengine/model"
 )
 
 // AlphaMemory 存储通过 AlphaNode 条件过滤后的单一事实集合。

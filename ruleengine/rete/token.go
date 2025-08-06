@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/ihewe/code_for_article/ruleengine/model"
+	"code_for_article/ruleengine/model"
 )
 
 // Token 是 β 网络中向下传播的“事实组合链”。
