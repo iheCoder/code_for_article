@@ -3,32 +3,51 @@ package rete
 import "code_for_article/ruleengine/model"
 
 // Node 是 rete 网络中所有节点的统一接口。
-// Token 从左流向右，Fact 从上游 Alpha 进入。
-
+// 它支持对 Fact 和 Token 的断言 (Assert) 与撤回 (Retract)。
 type Node interface {
-	AssertFact(model.Fact)
-	AssertToken(Token)
-	AddChild(Node)
+	AssertFact(f model.Fact)
+	RetractFact(f model.Fact)
+
+	AssertToken(t Token)
+	RetractToken(t Token)
+
+	AddChild(n Node)
 }
 
-// baseNode 提供通用的 children 管理实现。
-
+// baseNode 提供通用的 children 管理及传播实现。
 type baseNode struct {
 	children []Node
 }
 
+// AddChild 向节点添加一个子节点。
 func (b *baseNode) AddChild(n Node) {
 	b.children = append(b.children, n)
 }
 
-func (b *baseNode) propagateFactToChildren(f model.Fact) {
-	for _, c := range b.children {
-		c.AssertFact(f)
+// --- Propagate Assertions ---
+
+func (b *baseNode) propagateAssertFact(f model.Fact) {
+	for _, child := range b.children {
+		child.AssertFact(f)
 	}
 }
 
-func (b *baseNode) propagateTokenToChildren(t Token) {
-	for _, c := range b.children {
-		c.AssertToken(t)
+func (b *baseNode) propagateAssertToken(t Token) {
+	for _, child := range b.children {
+		child.AssertToken(t)
+	}
+}
+
+// --- Propagate Retractions ---
+
+func (b *baseNode) propagateRetractFact(f model.Fact) {
+	for _, child := range b.children {
+		child.RetractFact(f)
+	}
+}
+
+func (b *baseNode) propagateRetractToken(t Token) {
+	for _, child := range b.children {
+		child.RetractToken(t)
 	}
 }
