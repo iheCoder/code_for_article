@@ -158,7 +158,74 @@ sequenceDiagram
 
 ---
 
-## 5. 实施计划与进度
+## 5. 使用示例
+
+### 5.1 YAML 规则定义
+
+```yaml
+rules:
+  - name: "锁定用户检测"
+    description: "检测状态为锁定的用户"
+    salience: 10
+    when:
+      - type: "fact"
+        fact_type: "User"
+        field: "Status"
+        operator: "=="
+        value: "locked"
+    then:
+      type: "log"
+      message: "🚨 检测到锁定用户"
+```
+
+### 5.2 引擎使用示例
+
+```go
+package main
+
+import (
+    "code_for_article/ruleengine"
+    "code_for_article/ruleengine/model"
+)
+
+func main() {
+    // 创建引擎
+    engine := ruleengine.New()
+    
+    // 加载规则
+    engine.LoadRulesFromYAML("rules.yaml")
+    
+    // 插入事实
+    user := model.User{ID: 1, Status: "locked"}
+    engine.Assert(user)
+    
+    // 触发规则
+    engine.FireAllRules()
+}
+```
+
+### 5.3 演示效果
+
+运行 `simple_demo.go` 的输出：
+
+```
+🚀 简化版规则引擎演示
+========================================
+📖 加载规则...
+✅ 规则加载完成
+
+📋 场景2: 锁定用户
+🔥 RULE FIRED: 锁定用户检测 | Facts: [{2 李四 locked VIP }]
+🔥 规则触发: 🚨 检测到锁定用户 | 事实: [{2 李四 locked VIP }]
+
+📋 场景5: 大额交易
+🔥 RULE FIRED: 大额交易检测 | Facts: [{202 2 15000 CNY withdraw  }]
+🔥 规则触发: 💰 检测到大额交易 | 事实: [{202 2 15000 CNY withdraw  }]
+```
+
+---
+
+## 6. 实施计划与进度
 
 | 序号 | 任务                                      | 状态 |
 |----|-----------------------------------------|----|
@@ -167,8 +234,8 @@ sequenceDiagram
 | 3  | 完成 AlphaNode / BetaNode，打通简单 Join 流程    | ✅  |
 | 4  | 接入 TerminalNode + Agenda，能够触发 Action    | ✅  |
 | 5  | **[当前]** 扩展 NotNode / ExistsNode / AggregateNode (含撤回) | ✅  |
-| 6  | Builder 支持极简 YAML DSL，映射到网络             | ⏳  |
-| 7  | 提供演示用例：反欺诈场景，全流程演示增量更新                  |    |
+| 6  | Builder 支持极简 YAML DSL，映射到网络             | ✅  |
+| 7  | 提供演示用例：反欺诈场景，全流程演示增量更新                  | ✅  |
 | 8  | 增加热加载 Rule、并发安全优化、Metrics               |    |
 
 > 说明：⏳ 表示当前正在进行；✅ 表示已完成；空白表示未开始。

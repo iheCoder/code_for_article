@@ -1,0 +1,56 @@
+rules:
+  # 规则1: 检测锁定用户
+  - name: "锁定用户检测"
+    description: "检测状态为锁定的用户"
+    salience: 10
+    when:
+      - type: "fact"
+        fact_type: "User"
+        field: "Status"
+        operator: "=="
+        value: "locked"
+    then:
+      type: "log"
+      message: "🚨 检测到锁定用户"
+
+  # 规则2: 检测大额交易
+  - name: "大额交易检测"
+    description: "检测金额超过10000的交易"
+    salience: 8
+    when:
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 10000
+    then:
+      type: "log"
+      message: "💰 检测到大额交易"
+
+  # 规则3: 检测失败登录
+  - name: "失败登录检测"
+    description: "检测失败的登录尝试"
+    salience: 6
+    when:
+      - type: "fact"
+        fact_type: "LoginAttempt"
+        field: "Success"
+        operator: "=="
+        value: false
+    then:
+      type: "log"
+      message: "🔐 检测到登录失败"
+
+  # 规则4: 检测可疑用户
+  - name: "可疑用户检测"
+    description: "检测状态为可疑的用户"
+    salience: 7
+    when:
+      - type: "fact"
+        fact_type: "User"
+        field: "Status"
+        operator: "=="
+        value: "suspicious"
+    then:
+      type: "log"
+      message: "🔍 检测到可疑用户"

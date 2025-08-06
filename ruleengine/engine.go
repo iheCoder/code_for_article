@@ -2,21 +2,29 @@ package ruleengine
 
 import (
 	"fmt"
+	"io/ioutil"
 
 	"code_for_article/ruleengine/agenda"
+	"code_for_article/ruleengine/builder"
 	"code_for_article/ruleengine/model"
 	"code_for_article/ruleengine/rete"
+	"gopkg.in/yaml.v2"
 )
 
 // Engine 汇聚 rete 网络、agenda 与工作内存。
-
 type Engine struct {
 	alphaRoots []*rete.AlphaNode
 	ag         *agenda.Agenda
+	builder    *builder.Builder
 }
 
+// New 创建一个新的规则引擎实例。
 func New() *Engine {
-	return &Engine{ag: agenda.New()}
+	ag := agenda.New()
+	return &Engine{
+		ag:      ag,
+		builder: builder.NewBuilder(ag),
+	}
 }
 
 // AddAlphaRoot 将顶层 AlphaNode 注册给引擎。
@@ -24,10 +32,44 @@ func (e *Engine) AddAlphaRoot(nodes ...*rete.AlphaNode) {
 	e.alphaRoots = append(e.alphaRoots, nodes...)
 }
 
+// LoadRulesFromYAML 从 YAML 文件加载规则并构建 Rete 网络。
+func (e *Engine) LoadRulesFromYAML(filename string) error {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("读取文件失败: %w", err)
+	}
+
+	var ruleSet model.RuleSet
+	if err := yaml.Unmarshal(data, &ruleSet); err != nil {
+		return fmt.Errorf("解析 YAML 失败: %w", err)
+	}
+
+	return e.LoadRules(ruleSet.Rules)
+}
+
+// LoadRules 加载规则列表并构建 Rete 网络。
+func (e *Engine) LoadRules(rules []model.Rule) error {
+	for _, rule := range rules {
+		roots, err := e.builder.BuildRule(rule)
+		if err != nil {
+			return fmt.Errorf("构建规则 '%s' 失败: %w", rule.Name, err)
+		}
+		e.AddAlphaRoot(roots...)
+	}
+	return nil
+}
+
 // Assert 插入新事实。
 func (e *Engine) Assert(f model.Fact) {
 	for _, n := range e.alphaRoots {
 		n.AssertFact(f)
+	}
+}
+
+// Retract 撤回事实。
+func (e *Engine) Retract(f model.Fact) {
+	for _, n := range e.alphaRoots {
+		n.RetractFact(f)
 	}
 }
 

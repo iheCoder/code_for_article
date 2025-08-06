@@ -29,3 +29,13 @@ func (t *TerminalNode) AssertFact(fact model.Fact) {
 func (t *TerminalNode) AssertToken(tok Token) {
 	t.ag.Add(t.ruleName, tok, func() { t.action(tok) })
 }
+
+func (t *TerminalNode) RetractFact(fact model.Fact) {
+	// Terminal 不处理单独 Fact
+}
+
+func (t *TerminalNode) RetractToken(tok Token) {
+	// Terminal 不处理 Token 的撤回
+	// 但可以在需要时添加逻辑来处理 Token 的撤回
+	// 例如：如果需要在 Token 被撤回时执行某些清理操作
+}

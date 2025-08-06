@@ -1,0 +1,83 @@
+rules:
+  # 规则1: 账户被锁定用户的大额交易预警
+  - name: "锁定账户大额交易预警"
+    description: "当被锁定用户尝试进行大额交易时触发预警"
+    salience: 10
+    when:
+      - type: "fact"
+        fact_type: "User"
+        field: "Status"
+        operator: "=="
+        value: "locked"
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 10000
+        join:
+          left_field: "ID"
+          right_field: "UserID"
+    then:
+      type: "log"
+      message: "🚨 高风险: 锁定账户用户尝试大额交易"
+
+  # 规则2: 检测不存在有效账户的交易（使用 NOT）
+  - name: "无效账户交易检测"
+    description: "检测没有对应有效账户的交易"
+    salience: 8
+    when:
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Status"
+        operator: "=="
+        value: "pending"
+      - type: "not"
+        fact_type: "Account"
+        field: "Status"
+        operator: "=="
+        value: "active"
+        join:
+          left_field: "UserID"
+          right_field: "UserID"
+    then:
+      type: "log"
+      message: "⚠️  检测到无效账户交易"
+
+  # 规则3: 检测存在失败登录的用户交易（使用 EXISTS）
+  - name: "失败登录用户交易监控"
+    description: "监控有失败登录记录的用户的交易行为"
+    salience: 6
+    when:
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 5000
+      - type: "exists"
+        fact_type: "LoginAttempt"
+        field: "Success"
+        operator: "=="
+        value: false
+        join:
+          left_field: "UserID"
+          right_field: "UserID"
+    then:
+      type: "log"
+      message: "🔍 关注: 有失败登录记录的用户进行大额交易"
+
+  # 规则4: 多次失败登录聚合检测（使用 AGGREGATE）
+  - name: "多次失败登录检测"
+    description: "检测同一用户多次失败登录"
+    salience: 9
+    when:
+      - type: "aggregate"
+        fact_type: "LoginAttempt"
+        field: "Success"
+        operator: "=="
+        value: false
+        group_by: "UserID"
+        aggregate: "count"
+        threshold: 3
+    then:
+      type: "log"
+      message: "🚨 严重: 检测到多次失败登录，可能的暴力破解"
