@@ -1,0 +1,157 @@
+rules:
+  # 最高优先级：紧急安全检测（Salience: 100）
+  - name: "紧急_大额异地交易检测"
+    description: "检测大额异地交易，立即冻结"
+    salience: 100
+    when:
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 50000
+      - type: "fact"
+        fact_type: "UserProfile"
+        field: "HomeLocation"
+        operator: "!="
+        value: "Beijing"
+        join:
+          left_field: "UserID"
+          right_field: "UserID"
+    then:
+      type: "log"
+      message: "🚨 紧急警报：检测到大额异地交易！立即冻结账户"
+
+  # 高优先级：聚合风险检测（Salience: 80）
+  - name: "聚合_多次失败登录检测"
+    description: "检测用户多次失败登录尝试"
+    salience: 80
+    when:
+      - type: "aggregate"
+        fact_type: "LoginAttempt"
+        group_by: "UserID"
+        aggregate: "count"
+        threshold: 3
+        field: "Success"
+        operator: "=="
+        value: false
+    then:
+      type: "log"
+      message: "⚠️ 风险警报：检测到多次失败登录，建议临时锁定用户"
+
+  # 中等优先级：NOT逻辑检测（Salience: 50）
+  - name: "NOT_未绑定可信设备的高风险交易"
+    description: "检测在非可信设备上的高风险交易"
+    salience: 50
+    when:
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 10000
+      - type: "not"
+        fact_type: "DeviceInfo"
+        field: "Trusted"
+        operator: "=="
+        value: true
+        join:
+          left_field: "UserID"
+          right_field: "UserID"
+    then:
+      type: "log"
+      message: "🔍 安全提示：高额交易未在可信设备上操作，需要额外验证"
+
+  # 中等优先级：复杂条件检测（Salience: 40，Specificity: 4）
+  - name: "复杂_新用户高风险行为检测"
+    description: "新用户的复杂风险行为模式检测"
+    salience: 40
+    when:
+      - type: "fact"
+        fact_type: "UserProfile"
+        field: "RegistrationAge"
+        operator: "<"
+        value: 30
+      - type: "fact"
+        fact_type: "UserProfile"
+        field: "RiskScore"
+        operator: ">"
+        value: 70
+        join:
+          left_field: "UserID"
+          right_field: "UserID"
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 5000
+        join:
+          left_field: "UserID"
+          right_field: "UserID"
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Type"
+        operator: "=="
+        value: "withdraw"
+        join:
+          left_field: "UserID"
+          right_field: "UserID"
+    then:
+      type: "log"
+      message: "🎯 精准识别：新用户高风险提现行为，需要人工审核"
+
+  # 低优先级：基础检测（Salience: 20，Specificity: 2）
+  - name: "基础_大额交易检测"
+    description: "基础大额交易检测"
+    salience: 20
+    when:
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 20000
+      - type: "fact"
+        fact_type: "User"
+        field: "Status"
+        operator: "=="
+        value: "normal"
+        join:
+          left_field: "UserID"
+          right_field: "ID"
+    then:
+      type: "log"
+      message: "💰 常规提醒：检测到大额交易，建议关注"
+
+  # 低优先级：EXISTS逻辑检测（Salience: 10）
+  - name: "EXISTS_活跃用户优惠检测"
+    description: "为有交易记录的活跃用户提供优惠"
+    salience: 10
+    when:
+      - type: "fact"
+        fact_type: "User"
+        field: "Level"
+        operator: "=="
+        value: "VIP"
+      - type: "exists"
+        fact_type: "Transaction"
+        field: "Status"
+        operator: "=="
+        value: "completed"
+        join:
+          left_field: "ID"
+          right_field: "UserID"
+    then:
+      type: "log"
+      message: "🎁 优惠提醒：活跃VIP用户可享受专属优惠"
+
+  # 最低优先级：通用检测（Salience: 5，Specificity: 1）
+  - name: "通用_用户状态监控"
+    description: "通用用户状态监控"
+    salience: 5
+    when:
+      - type: "fact"
+        fact_type: "User"
+        field: "Status"
+        operator: "=="
+        value: "suspicious"
+    then:
+      type: "log"
+      message: "👀 状态监控：检测到可疑用户状态"

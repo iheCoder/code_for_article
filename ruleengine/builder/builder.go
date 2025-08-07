@@ -30,8 +30,11 @@ func (b *Builder) BuildRule(rule model.Rule) ([]*rete.AlphaNode, error) {
 	var rootNodes []*rete.AlphaNode
 	var currentNode rete.Node
 
+	// 计算规则特殊性（条件数量）
+	specificity := len(rule.When)
+
 	// 创建终端节点
-	terminalNode := rete.NewTerminalNode(rule.Name, b.agenda, b.createAction(rule.Then))
+	terminalNode := rete.NewTerminalNode(rule.Name, b.agenda, b.createAction(rule.Then), rule.Salience, specificity)
 
 	// 简化：处理第一个条件作为根节点
 	if len(rule.When) == 0 {

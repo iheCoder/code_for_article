@@ -70,3 +70,35 @@ type Cart struct {
 }
 
 func (c Cart) Key() string { return fmt.Sprintf("Cart:%d", c.ID) }
+
+// UserProfile 用户画像实体
+type UserProfile struct {
+	UserID          int    `json:"user_id"`
+	RegistrationAge int    `json:"registration_age"` // 注册天数
+	ActivityLevel   string `json:"activity_level"`   // "low", "normal", "high"
+	RiskScore       int    `json:"risk_score"`       // 0-100风险评分
+	HomeLocation    string `json:"home_location"`    // 常用地址
+}
+
+func (up UserProfile) Key() string { return fmt.Sprintf("UserProfile:%d", up.UserID) }
+
+// FailedAttempt 失败尝试实体（用于聚合统计）
+type FailedAttempt struct {
+	ID     int    `json:"id"`
+	UserID int    `json:"user_id"`
+	Type   string `json:"type"` // "login", "payment", "withdrawal"
+	Count  int    `json:"count"`
+}
+
+func (fa FailedAttempt) Key() string { return fmt.Sprintf("FailedAttempt:%d", fa.ID) }
+
+// DeviceInfo 设备信息实体
+type DeviceInfo struct {
+	DeviceID   string `json:"device_id"`
+	UserID     int    `json:"user_id"`
+	Trusted    bool   `json:"trusted"`
+	LastSeen   int64  `json:"last_seen"`
+	DeviceType string `json:"device_type"` // "mobile", "desktop", "tablet"
+}
+
+func (di DeviceInfo) Key() string { return fmt.Sprintf("DeviceInfo:%s", di.DeviceID) }

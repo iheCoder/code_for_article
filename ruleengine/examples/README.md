@@ -1,170 +1,209 @@
-# Rete 规则引擎演示案例
+# 规则引擎演示程序
 
-本目录包含多个完整的演示案例，展示了 Go 实现的 Rete 规则引擎的各种特性和应用场景。
+本目录包含了各种规则引擎功能的演示程序，展示了从基础功能到高级特性的完整应用。
 
-## 📋 演示案例列表
+## 📁 文件列表
 
-### 1. 基础优惠券场景 (`coupon_engine_demo.go`)
+### 🎯 核心演示
 
-**特性展示**：
-- ✅ 基础的 Alpha/Beta 网络构建
-- ✅ 跨事实关联 (User ↔ Cart)
-- ✅ 增量匹配和记忆化
-- ✅ 事实更新与撤回
+#### `conflict_resolution_demo.go` - 组合冲突解决策略演示
+**重点功能**: 展示组合冲突解决策略的完整工作流程
 
-**运行命令**：
+**演示内容**:
+- ✅ **Salience（优先级）**: 数字越大越优先执行
+- ✅ **Specificity（特殊性）**: 条件越多越优先执行  
+- ✅ **LIFO（后进先出）**: 相同优先级和特殊性时，后激活的规则先执行
+
+**运行命令**:
 ```bash
-go run ./ruleengine/examples/coupon_engine_demo.go
+go run ruleengine/examples/conflict_resolution_demo.go
 ```
 
-**核心规则**：
-- VIP 用户 + 大额购物车 (>100) → VIP大额订单优惠
-- 超大额购物车 (>500) → 高价值购物车优惠
+**演示效果**:
+```
+🚀 组合冲突解决策略演示
+========================================
+📋 场景 1: Salience（优先级）演示
+🔥 RULE FIRED: 高优先级规则 | Facts: [{1 张三 normal VIP }]
+🔥 RULE FIRED: 低优先级但高特殊性规则 | Facts: [{1 张三 normal VIP } {1 张三 normal VIP }]
+🔥 RULE FIRED: 中优先级规则 | Facts: [{1 张三 normal VIP }]
+🔥 RULE FIRED: 基础规则 | Facts: [{1 张三 normal VIP }]
 
-### 2. 高级优惠券场景 (`advanced_coupon_demo.go`)
-
-**特性展示**：
-- ✅ 复杂的多层 Rete 网络
-- ✅ NotNode 否定逻辑（无活跃账户检测）
-- ✅ ExistsNode 存在性检查（高余额账户）
-- ✅ AggregateNode 聚合计数（多购物车统计）
-- ✅ 多规则并行执行
-- ✅ 复杂的网络拓扑结构
-
-**运行命令**：
-```bash
-go run ./ruleengine/examples/advanced_coupon_demo.go
+📋 场景 2: LIFO（后进先出）策略演示
+📝 规则C执行 - 第三个添加的（应该最先执行）
+📝 规则B执行 - 第二个添加的  
+📝 规则A执行 - 第一个添加的
 ```
 
-**核心规则**：
-- VIP + 大额购物车 → 15%折扣
-- VIP + 高余额账户 → 白金会员升级
-- 普通用户 + 无活跃账户 → 开户建议
-- VIP + EXISTS(高余额) → 超级VIP福利
-- 多购物车聚合 → 满减优惠券
-- 超大额订单 → 人工客服跟进
+#### `advanced_nodes_demo.go` - 高级节点功能演示  
+**重点功能**: 展示NotNode、AggregateNode、ExistsNode的应用
 
-### 3. 反欺诈检测场景 (`simple_demo.go`)
+**演示内容**:
+- 🔍 **NotNode概念**: 检测缺失条件的逻辑
+- 📊 **AggregateNode概念**: 聚合统计功能
+- ✅ **ExistsNode概念**: 存在性检查
+- 🎯 **复杂场景**: 多规则冲突解决的实际应用
 
-**特性展示**：
-- ✅ YAML DSL 规则加载
-- ✅ 简化的规则定义语法
-- ✅ 多种事实类型处理
-- ✅ 动态规则匹配
-
-**运行命令**：
+**运行命令**:
 ```bash
-go run ./ruleengine/examples/simple_demo.go
+go run ruleengine/examples/advanced_nodes_demo.go
 ```
 
-**核心规则**：
-- 锁定用户检测
-- 大额交易监控 (>10000)
-- 失败登录检测
-- 可疑用户标记
+#### `smart_risk_control_demo.go` - 智能风控系统演示
+**重点功能**: 完整的业务场景应用示例
 
-### 4. 完整反欺诈场景 (`fraud_detection_demo.go`)
+**演示内容**:
+- 🚨 紧急风险检测（最高优先级）
+- ⚠️ 聚合风险分析
+- 🔍 安全设备验证（NotNode应用）
+- 🎁 用户优惠检测（ExistsNode应用）
+- 💰 基础交易监控
 
-**特性展示**：
-- ✅ 复杂的 YAML 规则定义
-- ✅ 多实体关联检测
-- ✅ 高级规则组合
-- ✅ 企业级反欺诈逻辑
-
-**运行命令**：
+**运行命令**:
 ```bash
-go run ./ruleengine/examples/fraud_detection_demo.go
+go run ruleengine/examples/smart_risk_control_demo.go
 ```
 
-**核心规则**：
-- 锁定账户大额交易预警
-- 无效账户交易检测 (NOT逻辑)
-- 失败登录用户交易监控 (EXISTS逻辑)
-- 多次失败登录聚合检测 (AGGREGATE逻辑)
+### 📋 配置文件
 
-## 🏗️ 规则定义文件
-
-### YAML 规则文件
-
-- `simple_fraud_rules.yaml` - 简化的反欺诈规则
-- `fraud_rules.yaml` - 完整的反欺诈规则集
-
-### 示例规则结构
+#### `smart_risk_control_rules.yaml` - 智能风控规则配置
+完整的YAML规则配置示例，包含：
 
 ```yaml
 rules:
-  - name: "规则名称"
-    description: "规则描述"
-    salience: 10  # 优先级
+  # 最高优先级：紧急安全检测（Salience: 100）
+  - name: "紧急_大额异地交易检测"
+    salience: 100
     when:
       - type: "fact"
-        fact_type: "User"
-        field: "Status"
-        operator: "=="
-        value: "locked"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 50000
     then:
       type: "log"
-      message: "检测到锁定用户"
+      message: "🚨 紧急警报：检测到大额异地交易！"
+
+  # 聚合检测（Salience: 80）
+  - name: "聚合_多次失败登录检测"
+    salience: 80
+    when:
+      - type: "aggregate"
+        fact_type: "LoginAttempt"
+        group_by: "UserID"
+        threshold: 3
+    then:
+      type: "log"
+      message: "⚠️ 检测到多次失败登录"
+
+  # NOT逻辑检测（Salience: 50）
+  - name: "NOT_未绑定可信设备的高风险交易"
+    salience: 50
+    when:
+      - type: "fact"
+        fact_type: "Transaction"
+        field: "Amount"
+        operator: ">"
+        value: 10000
+      - type: "not"
+        fact_type: "DeviceInfo"
+        field: "Trusted"
+        operator: "=="
+        value: true
+    then:
+      type: "log"
+      message: "🔍 高额交易未在可信设备上操作"
 ```
 
 ## 🚀 快速开始
 
-### 运行所有演示
-
+### 1. 运行基础演示
 ```bash
-# 基础优惠券演示
-go run ./ruleengine/examples/coupon_engine_demo.go
+# 克隆项目
+cd /path/to/code_for_article
 
-# 高级优惠券演示  
-go run ./ruleengine/examples/advanced_coupon_demo.go
+# 运行冲突解决策略演示
+go run ruleengine/examples/conflict_resolution_demo.go
 
-# 反欺诈演示
-go run ./ruleengine/examples/simple_demo.go
-
-# 完整反欺诈演示
-go run ./ruleengine/examples/fraud_detection_demo.go
+# 运行高级节点演示
+go run ruleengine/examples/advanced_nodes_demo.go
 ```
 
-### 检查代码质量
+### 2. 理解输出
+每个演示都会清晰地展示：
+- 📋 **场景描述**: 当前测试的具体功能
+- 🔥 **规则触发**: 显示哪个规则被激活及其处理的事实
+- ⭐ **执行顺序**: 演示冲突解决策略的实际效果
+- 📚 **总结说明**: 解释关键概念和实现细节
 
-```bash
-# 代码格式化
-go fmt ./ruleengine/...
+### 3. 自定义规则
+参考 `smart_risk_control_rules.yaml` 创建自己的规则配置：
 
-# 编译检查
-go build ./ruleengine/...
-
-# 运行测试（如果有）
-go test ./ruleengine/...
+```yaml
+rules:
+  - name: "我的自定义规则"
+    salience: 80  # 设置优先级
+    when:
+      - type: "fact"
+        fact_type: "MyEntity"
+        field: "MyField"
+        operator: "=="
+        value: "MyValue"
+    then:
+      type: "log"
+      message: "我的规则被触发了！"
 ```
 
-## 📊 特性覆盖矩阵
+## 🎯 核心特性展示
 
-| 特性 | 基础优惠券 | 高级优惠券 | 简单反欺诈 | 完整反欺诈 |
-|------|-----------|-----------|-----------|-----------|
-| AlphaNode | ✅ | ✅ | ✅ | ✅ |
-| BetaNode | ✅ | ✅ | ❌ | ✅ |
-| NotNode | ❌ | ✅ | ❌ | ✅ |
-| ExistsNode | ❌ | ✅ | ❌ | ✅ |
-| AggregateNode | ❌ | ✅ | ❌ | ✅ |
-| YAML DSL | ❌ | ❌ | ✅ | ✅ |
-| 撤回机制 | ✅ | ✅ | ✅ | ✅ |
-| 复杂网络 | ❌ | ✅ | ❌ | ✅ |
+### ✅ 已实现功能
 
-## 💡 学习路径建议
+1. **组合冲突解决策略**
+   - Salience（优先级）排序
+   - Specificity（特殊性）排序
+   - LIFO（后进先出）最终排序
 
-1. **入门**: 从 `coupon_engine_demo.go` 开始，理解基础的 Alpha/Beta 网络
-2. **进阶**: 运行 `simple_demo.go`，学习 YAML DSL 的使用
-3. **深入**: 探索 `advanced_coupon_demo.go`，理解复杂的网络拓扑
-4. **应用**: 研究 `fraud_detection_demo.go`，了解企业级应用场景
+2. **基础规则引擎**
+   - AlphaNode（单事实过滤）
+   - BetaNode（多事实连接）
+   - TerminalNode（规则激活）
 
-## 🔧 扩展指南
+3. **智能议程管理**
+   - 动态规则排序
+   - 可插拔冲突解决策略
+   - 实时优先级调整
 
-要创建自己的规则场景：
+### 🚧 待完善功能
 
-1. 定义业务实体（实现 `model.Fact` 接口）
-2. 编写规则逻辑（代码或 YAML）
-3. 构建 Rete 网络（手动或通过 Builder）
-4. 测试和验证规则行为
+1. **高级节点类型**
+   - NotNode（需要Builder层完善）
+   - AggregateNode（需要Builder层完善）
+   - ExistsNode（需要Builder层完善）
 
-参考现有演示代码的结构和模式，可以快速搭建适合你业务场景的规则引擎！
+2. **增强功能**
+   - 动态规则热加载
+   - 规则性能监控
+   - 更复杂的条件表达式
+
+## 📖 学习路径
+
+推荐按以下顺序学习：
+
+1. **入门**: 运行 `conflict_resolution_demo.go` 理解基础概念
+2. **进阶**: 运行 `advanced_nodes_demo.go` 了解高级特性
+3. **实战**: 研究 `smart_risk_control_demo.go` 学习业务应用
+4. **深入**: 阅读源码理解Rete算法实现
+
+## 🤝 贡献指南
+
+欢迎提交更多演示场景和改进建议！
+
+### 添加新演示的步骤：
+1. 创建新的 `*_demo.go` 文件
+2. 如需要，创建对应的 YAML 配置文件
+3. 更新本 README 文件
+4. 确保代码有清晰的注释和输出说明
+
+---
+
+**💡 提示**: 所有演示都包含详细的输出说明，运行时请仔细观察控制台输出中的规则执行顺序和逻辑说明。
