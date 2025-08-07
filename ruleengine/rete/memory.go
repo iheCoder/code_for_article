@@ -18,8 +18,8 @@ func NewAlphaMemory() *AlphaMemory {
 	return &AlphaMemory{data: make(map[string]model.Fact)}
 }
 
-// Assert 插入新 fact，若已存在则返回 false（未变更）。
-func (m *AlphaMemory) Assert(f model.Fact) bool {
+// Add 插入新 fact，若已存在则返回 false（未变更）。
+func (m *AlphaMemory) Add(f model.Fact) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.data[f.Key()]; ok {
@@ -71,8 +71,8 @@ func NewBetaMemory() *BetaMemory {
 	return &BetaMemory{data: make(map[string]Token)}
 }
 
-// Assert 插入新 token；若已存在返回 false。
-func (m *BetaMemory) Assert(t Token) bool {
+// Add 插入新 token；若已存在返回 false。
+func (m *BetaMemory) Add(t Token) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.data[t.Hash()]; ok {

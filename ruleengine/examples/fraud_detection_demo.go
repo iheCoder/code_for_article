@@ -51,44 +51,44 @@ func main() {
 
 	// 4. 演示场景1: 正常用户交易（不应触发任何规则）
 	fmt.Println("\n📋 场景1: 正常用户交易")
-	engine.Assert(normalUser)
-	engine.Assert(activeAccount1)
-	engine.Assert(normalTransaction)
+	engine.AddFact(normalUser)
+	engine.AddFact(activeAccount1)
+	engine.AddFact(normalTransaction)
 	engine.FireAllRules()
 
 	// 5. 演示场景2: 锁定用户大额交易（应触发规则1）
 	fmt.Println("\n📋 场景2: 锁定用户大额交易")
-	engine.Assert(lockedUser)
-	engine.Assert(activeAccount2)
-	engine.Assert(largeTransaction)
+	engine.AddFact(lockedUser)
+	engine.AddFact(activeAccount2)
+	engine.AddFact(largeTransaction)
 	engine.FireAllRules()
 
 	// 6. 演示场景3: 无效账户交易（应触发规则2）
 	fmt.Println("\n📋 场景3: 无效账户交易检测")
-	engine.Assert(invalidTransaction)
+	engine.AddFact(invalidTransaction)
 	engine.FireAllRules()
 
 	// 7. 演示场景4: 有失败登录记录的用户大额交易（应触发规则3）
 	fmt.Println("\n📋 场景4: 失败登录用户交易监控")
-	engine.Assert(suspiciousUser)
-	engine.Assert(frozenAccount)
-	engine.Assert(failedLogin1) // 添加一次失败登录
-	engine.Assert(suspiciousTransaction)
+	engine.AddFact(suspiciousUser)
+	engine.AddFact(frozenAccount)
+	engine.AddFact(failedLogin1) // 添加一次失败登录
+	engine.AddFact(suspiciousTransaction)
 	engine.FireAllRules()
 
 	// 8. 演示场景5: 多次失败登录聚合检测（应触发规则4）
 	fmt.Println("\n📋 场景5: 多次失败登录聚合检测")
-	engine.Assert(failedLogin2) // 第2次失败
-	engine.Assert(failedLogin3) // 第3次失败 - 应该触发聚合规则
+	engine.AddFact(failedLogin2) // 第2次失败
+	engine.AddFact(failedLogin3) // 第3次失败 - 应该触发聚合规则
 	engine.FireAllRules()
 
-	engine.Assert(failedLogin4) // 第4次失败 - 再次触发
+	engine.AddFact(failedLogin4) // 第4次失败 - 再次触发
 	engine.FireAllRules()
 
 	// 9. 演示撤回功能
 	fmt.Println("\n📋 场景6: 撤回演示")
 	fmt.Println("撤回锁定用户...")
-	engine.Retract(lockedUser)
+	engine.RetractFact(lockedUser)
 	engine.FireAllRules() // 应该不再有相关规则触发
 
 	fmt.Println("\n🎉 反欺诈演示完成!")

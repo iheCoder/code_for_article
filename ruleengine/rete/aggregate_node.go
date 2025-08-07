@@ -11,20 +11,20 @@ type AggregateFunc func(f model.Fact) (groupKey string, ok bool)
 // AggregateNode 实现聚合功能，例如 "count(事实) > N"。
 //
 // 工作流程:
-// 1. Assert: 当一个 Fact 到达时，使用 groupBy 函数提取其分组键。
+// 1. AssertFact: 当一个 Fact 到达时，使用 groupBy 函数提取其分组键。
 //   - 对应分组的计数器加一。
 //   - 如果计数值 **首次** 达到或超过阈值 (threshold)，则生成一个特殊的聚合结果事实
 //     (AggregateResult) 并向下游传播。
 //
-// 2. Retract: (为保持示例简洁，本实现 **未** 完整支持撤回)
+// 2. RetractFact: (为保持示例简洁，本实现 **未** 完整支持撤回)
 //   - 理想情况下，撤回一个 Fact 会使其分组计数减一。
 //   - 如果计数值从阈值之上降到阈值之下，则应向下游传播对聚合结果事实的撤回。
 type AggregateNode struct {
 	baseNode
-	groupBy     AggregateFunc
-	threshold   int
-	rightMemory *AlphaMemory
-	counts      map[string]int // groupKey -> count
+	groupBy    AggregateFunc
+	threshold  int
+	rightFacts *AlphaMemory
+	counts     map[string]int // groupKey -> count
 }
 
 // AggregateResult 是一个特殊的事实，代表聚合运算的结果。
@@ -37,17 +37,21 @@ func (ar AggregateResult) Key() string { return fmt.Sprintf("agg:%s", ar.GroupKe
 
 func NewAggregateNode(groupBy AggregateFunc, threshold int) *AggregateNode {
 	return &AggregateNode{
-		groupBy:     groupBy,
-		threshold:   threshold,
-		rightMemory: NewAlphaMemory(),
-		counts:      make(map[string]int),
+		groupBy:    groupBy,
+		threshold:  threshold,
+		rightFacts: NewAlphaMemory(),
+		counts:     make(map[string]int),
 	}
 }
 
 func (a *AggregateNode) AssertFact(f model.Fact) {
-	if !a.rightMemory.Assert(f) {
+	// 仅当事实满足分组条件时，才进行聚合
+	if !a.rightFacts.Add(f) {
 		return
 	}
+
+	// 使用 groupBy 函数提取分组键
+	// 如果无法提取分组键，则忽略该事实
 	key, ok := a.groupBy(f)
 	if !ok {
 		return

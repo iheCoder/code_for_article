@@ -3,7 +3,7 @@ package rete
 import "code_for_article/ruleengine/model"
 
 // Node 是 rete 网络中所有节点的统一接口。
-// 它支持对 Fact 和 Token 的断言 (Assert) 与撤回 (Retract)。
+// 它支持对 Fact 和 Token 的断言 (AssertFact) 与撤回 (RetractFact)。
 type Node interface {
 	AssertFact(f model.Fact)
 	RetractFact(f model.Fact)

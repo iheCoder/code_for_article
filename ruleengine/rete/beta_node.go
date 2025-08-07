@@ -10,37 +10,38 @@ type JoinFunc func(t Token, f model.Fact) bool
 // 并根据指定的 Join 条件将它们组合成新的、更长的 Token。
 //
 // 工作流程:
-// - Assert:
-//  1. 当左侧 Token 到达时，存入 leftMemory，并与 rightMemory 中的所有 Fact 进行匹配。
-//  2. 当右侧 Fact 到达时，存入 rightMemory，并与 leftMemory 中的所有 Token 进行匹配。
+// - AssertFact:
+//  1. 当左侧 Token 到达时，存入 leftTokens，并与 rightFacts 中的所有 Fact 进行匹配。
+//  2. 当右侧 Fact 到达时，存入 rightFacts，并与 leftTokens 中的所有 Token 进行匹配。
 //  3. 每当匹配成功，就创建一个新的组合 Token 并向下游传播。
 //
-// - Retract:
+// - RetractFact:
 //  1. 当 Token 或 Fact 被撤回时，从相应内存中移除。
 //  2. 同时，找到所有由它参与构成的下游 Token，并对它们发起撤回传播。
 type BetaNode struct {
 	baseNode
-	join        JoinFunc
-	leftMemory  *BetaMemory
-	rightMemory *AlphaMemory
+	join       JoinFunc
+	leftTokens *BetaMemory
+	rightFacts *AlphaMemory
 }
 
 // NewBetaNode 创建一个新的 BetaNode。
 func NewBetaNode(j JoinFunc) *BetaNode {
 	return &BetaNode{
-		join:        j,
-		leftMemory:  NewBetaMemory(),
-		rightMemory: NewAlphaMemory(),
+		join:       j,
+		leftTokens: NewBetaMemory(),
+		rightFacts: NewAlphaMemory(),
 	}
 }
 
 // AssertToken 处理来自左侧的 Token 断言。
 func (b *BetaNode) AssertToken(t Token) {
-	if !b.leftMemory.Assert(t) {
+	if !b.leftTokens.Add(t) {
 		return
 	}
 	// 与右侧所有事实进行 Join
-	for _, f := range b.rightMemory.Snapshot() {
+	for _, f := range b.rightFacts.Snapshot() {
+		// 如果 Join 成功，则生成新的 Token 并传播
 		if b.join(t, f) {
 			newToken := extendToken(t, f)
 			b.propagateAssertToken(newToken)
@@ -50,11 +51,15 @@ func (b *BetaNode) AssertToken(t Token) {
 
 // RetractToken 处理来自左侧的 Token 撤回。
 func (b *BetaNode) RetractToken(t Token) {
-	if !b.leftMemory.Retract(t) {
+	// 从左侧内存中移除 Token
+	if !b.leftTokens.Retract(t) {
 		return
 	}
+
 	// 撤回所有相关的下游 Token
-	for _, f := range b.rightMemory.Snapshot() {
+	// 这里的 Join 是为了找到所有与 t 相关的 Fact
+	// 并生成新的 Token 进行撤回传播
+	for _, f := range b.rightFacts.Snapshot() {
 		if b.join(t, f) {
 			staleToken := extendToken(t, f)
 			b.propagateRetractToken(staleToken)
@@ -64,11 +69,14 @@ func (b *BetaNode) RetractToken(t Token) {
 
 // AssertFact 处理来自右侧的 Fact 断言。
 func (b *BetaNode) AssertFact(f model.Fact) {
-	if !b.rightMemory.Assert(f) {
+	// 当 Fact 满足条件时，将其添加到右侧内存
+	// 如果 Fact 不满足条件，则直接返回
+	if !b.rightFacts.Add(f) {
 		return
 	}
+
 	// 与左侧所有 Token 进行 Join
-	for _, t := range b.leftMemory.Snapshot() {
+	for _, t := range b.leftTokens.Snapshot() {
 		if b.join(t, f) {
 			newToken := extendToken(t, f)
 			b.propagateAssertToken(newToken)
@@ -78,11 +86,12 @@ func (b *BetaNode) AssertFact(f model.Fact) {
 
 // RetractFact 处理来自右侧的 Fact 撤回。
 func (b *BetaNode) RetractFact(f model.Fact) {
-	if !b.rightMemory.Retract(f) {
+	if !b.rightFacts.Retract(f) {
 		return
 	}
+
 	// 撤回所有相关的下游 Token
-	for _, t := range b.leftMemory.Snapshot() {
+	for _, t := range b.leftTokens.Snapshot() {
 		if b.join(t, f) {
 			staleToken := extendToken(t, f)
 			b.propagateRetractToken(staleToken)

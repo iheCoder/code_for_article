@@ -255,37 +255,37 @@ func main() {
 
 	// === 演示场景1：VIP用户 + 大额购物车 ===
 	fmt.Println("\n📋 场景1: VIP用户大额消费")
-	eng.Assert(vipUser)
-	eng.Assert(richAccount)
-	eng.Assert(vipCart1)
+	eng.AddFact(vipUser)
+	eng.AddFact(richAccount)
+	eng.AddFact(vipCart1)
 	eng.FireAllRules()
 
 	// === 演示场景2：添加更多购物车，触发聚合和超级VIP ===
 	fmt.Println("\n📋 场景2: VIP用户多购物车 + 高余额")
-	eng.Assert(vipCart2)
+	eng.AddFact(vipCart2)
 	eng.FireAllRules()
 
 	// === 演示场景3：普通用户但没有活跃账户 ===
 	fmt.Println("\n📋 场景3: 普通用户消费（无活跃账户）")
-	eng.Assert(normalUser)
-	eng.Assert(normalCart)
+	eng.AddFact(normalUser)
+	eng.AddFact(normalCart)
 	// 注意：不添加 normalAccount，测试 NOT 逻辑
 	eng.FireAllRules()
 
 	// === 演示场景4：超大额订单 ===
 	fmt.Println("\n📋 场景4: 超大额订单处理")
-	eng.Assert(anotherVIP)
-	eng.Assert(megaCart)
+	eng.AddFact(anotherVIP)
+	eng.AddFact(megaCart)
 	eng.FireAllRules()
 
 	// === 演示场景5：后续添加活跃账户 ===
 	fmt.Println("\n📋 场景5: 添加普通用户的活跃账户")
-	eng.Assert(normalAccount)
+	eng.AddFact(normalAccount)
 	eng.FireAllRules()
 
 	// === 演示撤回功能 ===
 	fmt.Println("\n📋 场景6: 撤回VIP用户")
-	eng.Retract(vipUser)
+	eng.RetractFact(vipUser)
 	eng.FireAllRules()
 
 	fmt.Println("\n🎉 高级优惠券演示完成!")

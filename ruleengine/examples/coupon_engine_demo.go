@@ -68,18 +68,18 @@ func main() {
 
 	fmt.Println("=== 第一阶段：插入 VIP 用户 ===")
 	user := model.User{ID: 1, Level: "VIP"}
-	eng.Assert(user)
+	eng.AddFact(user)
 
 	fmt.Println("=== 第二阶段：插入购物车 (150) ===")
 	cart := model.Cart{ID: 101, UserID: 1, TotalValue: 150}
-	eng.Assert(cart)
+	eng.AddFact(cart)
 
 	fmt.Println("=== 触发规则 ===")
 	eng.FireAllRules()
 
 	fmt.Println("\n=== 第三阶段：更新购物车 (600) ===")
 	cartUpdated := model.Cart{ID: 101, UserID: 1, TotalValue: 600}
-	eng.Assert(cartUpdated) // 简化：直接 assert 新事实
+	eng.AddFact(cartUpdated) // 简化：直接 assert 新事实
 
 	fmt.Println("=== 触发规则 ===")
 	eng.FireAllRules()

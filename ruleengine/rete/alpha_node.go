@@ -10,9 +10,9 @@ type AlphaFunc func(f model.Fact) bool
 // 它持有一个 AlphaMemory 来存储所有满足其条件的事实，确保唯一性。
 //
 // 工作流程:
-//  1. Assert: 当一个新事实进入时，如果它满足 AlphaNode 的条件且尚未存在于内存中，
+//  1. AssertFact: 当一个新事实进入时，如果它满足 AlphaNode 的条件且尚未存在于内存中，
 //     则将其存入 AlphaMemory，并同时向下游传播该事实及其对应的单元素 Token。
-//  2. Retract: 当一个事实被撤回时，如果它满足条件且存在于内存中，
+//  2. RetractFact: 当一个事实被撤回时，如果它满足条件且存在于内存中，
 //     则从 AlphaMemory 中移除，并向下游传播撤回信号。
 type AlphaNode struct {
 	baseNode
@@ -30,7 +30,10 @@ func (a *AlphaNode) AssertFact(f model.Fact) {
 	if !a.cond(f) {
 		return
 	}
-	if a.memory.Assert(f) {
+
+	// 检查内存中是否已存在该事实
+	// 如果不存在，则插入新事实并传播
+	if a.memory.Add(f) {
 		// 新事实满足条件，向下游传播
 		// - 传播事实本身，供其他 AlphaNode 或 BetaNode 右输入使用。
 		// - 传播单元素 Token，供 BetaNode 或逻辑节点的左输入使用。

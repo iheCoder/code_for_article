@@ -2,7 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 
 	"code_for_article/ruleengine/agenda"
 	"code_for_article/ruleengine/builder"
@@ -34,7 +34,7 @@ func (e *Engine) AddAlphaRoot(nodes ...*rete.AlphaNode) {
 
 // LoadRulesFromYAML 从 YAML 文件加载规则并构建 Rete 网络。
 func (e *Engine) LoadRulesFromYAML(filename string) error {
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("读取文件失败: %w", err)
 	}
@@ -59,15 +59,15 @@ func (e *Engine) LoadRules(rules []model.Rule) error {
 	return nil
 }
 
-// Assert 插入新事实。
-func (e *Engine) Assert(f model.Fact) {
+// AddFact 插入新事实。
+func (e *Engine) AddFact(f model.Fact) {
 	for _, n := range e.alphaRoots {
 		n.AssertFact(f)
 	}
 }
 
-// Retract 撤回事实。
-func (e *Engine) Retract(f model.Fact) {
+// RetractFact 撤回事实。
+func (e *Engine) RetractFact(f model.Fact) {
 	for _, n := range e.alphaRoots {
 		n.RetractFact(f)
 	}

@@ -7,13 +7,13 @@ import "code_for_article/ruleengine/model"
 //
 // 工作流程:
 // 1. 左侧 Token (t) 到达:
-//   - 存入 leftMemory。
-//   - 检查 rightMemory 中是否有 Fact (f) 满足 join(t, f)。
+//   - 存入 leftTokens。
+//   - 检查 rightFacts 中是否有 Fact (f) 满足 join(t, f)。
 //   - 如果一个匹配都没有，则立即向下游传播 t。
 //
 // 2. 右侧 Fact (f) 到达:
-//   - 存入 rightMemory。
-//   - 检查 leftMemory 中是否有 Token (t) 满足 join(t, f)。
+//   - 存入 rightFacts。
+//   - 检查 leftTokens 中是否有 Token (t) 满足 join(t, f)。
 //   - 对于每个新匹配上的 Token，如果它之前是“无匹配”状态（即已被传播过），
 //     则需要向下游传播对该 Token 的撤回信号。
 //
@@ -25,28 +25,28 @@ import "code_for_article/ruleengine/model"
 // 为了精确实现撤回，我们使用一个 counter 来记录每个左侧 Token 的匹配数量。
 type NotNode struct {
 	baseNode
-	join        JoinFunc
-	leftMemory  *BetaMemory
-	rightMemory *AlphaMemory
-	counter     map[string]int // token.hash -> match count
+	join       JoinFunc
+	leftTokens *BetaMemory
+	rightFacts *AlphaMemory
+	counter    map[string]int // token.hash -> match count
 }
 
 func NewNotNode(j JoinFunc) *NotNode {
 	return &NotNode{
-		join:        j,
-		leftMemory:  NewBetaMemory(),
-		rightMemory: NewAlphaMemory(),
-		counter:     make(map[string]int),
+		join:       j,
+		leftTokens: NewBetaMemory(),
+		rightFacts: NewAlphaMemory(),
+		counter:    make(map[string]int),
 	}
 }
 
 func (n *NotNode) AssertToken(t Token) {
-	if !n.leftMemory.Assert(t) {
+	if !n.leftTokens.Add(t) {
 		return
 	}
 
 	count := 0
-	for _, f := range n.rightMemory.Snapshot() {
+	for _, f := range n.rightFacts.Snapshot() {
 		if n.join(t, f) {
 			count++
 		}
@@ -59,7 +59,7 @@ func (n *NotNode) AssertToken(t Token) {
 }
 
 func (n *NotNode) RetractToken(t Token) {
-	if !n.leftMemory.Retract(t) {
+	if !n.leftTokens.Retract(t) {
 		return
 	}
 	// 如果这个 token 之前没有匹配项（即曾被传播过），则传播撤回
@@ -70,10 +70,10 @@ func (n *NotNode) RetractToken(t Token) {
 }
 
 func (n *NotNode) AssertFact(f model.Fact) {
-	if !n.rightMemory.Assert(f) {
+	if !n.rightFacts.Add(f) {
 		return
 	}
-	for _, t := range n.leftMemory.Snapshot() {
+	for _, t := range n.leftTokens.Snapshot() {
 		if n.join(t, f) {
 			// 匹配数从 0 -> 1，意味着之前传播的 Token 需要被撤回
 			if n.counter[t.Hash()] == 0 {
@@ -85,10 +85,10 @@ func (n *NotNode) AssertFact(f model.Fact) {
 }
 
 func (n *NotNode) RetractFact(f model.Fact) {
-	if !n.rightMemory.Retract(f) {
+	if !n.rightFacts.Retract(f) {
 		return
 	}
-	for _, t := range n.leftMemory.Snapshot() {
+	for _, t := range n.leftTokens.Snapshot() {
 		if n.join(t, f) {
 			n.counter[t.Hash()]--
 			// 匹配数从 1 -> 0，意味着这个 Token 现在没有匹配了，需要被传播

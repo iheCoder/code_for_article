@@ -10,8 +10,8 @@ import "code_for_article/ruleengine/model"
 // 以确保只在匹配状态发生关键转变时才传播信号（断言或撤回）。
 //
 // - 状态转变点:
-//   - **Assert**: 当一个 Token 的匹配数从 0 增加到 1 时，传播断言。
-//   - **Retract**: 当一个 Token 的匹配数从 1 减少到 0 时，传播撤回。
+//   - **AssertFact**: 当一个 Token 的匹配数从 0 增加到 1 时，传播断言。
+//   - **RetractFact**: 当一个 Token 的匹配数从 1 减少到 0 时，传播撤回。
 type ExistsNode struct {
 	baseNode
 	join        JoinFunc
@@ -30,7 +30,7 @@ func NewExistsNode(j JoinFunc) *ExistsNode {
 }
 
 func (e *ExistsNode) AssertToken(t Token) {
-	if !e.leftMemory.Assert(t) {
+	if !e.leftMemory.Add(t) {
 		return
 	}
 	count := 0
@@ -57,7 +57,7 @@ func (e *ExistsNode) RetractToken(t Token) {
 }
 
 func (e *ExistsNode) AssertFact(f model.Fact) {
-	if !e.rightMemory.Assert(f) {
+	if !e.rightMemory.Add(f) {
 		return
 	}
 	for _, t := range e.leftMemory.Snapshot() {
