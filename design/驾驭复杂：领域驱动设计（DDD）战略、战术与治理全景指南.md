@@ -344,6 +344,32 @@ Dispatch ◄──(Shared Kernel：地理栅格编码/司机可用性字典，�
 
 
 
+#### 1.3 聚合与限界上下文的关系：院子在“小区”里
+
+**一句话**：**聚合永远生活在某个限界上下文内部**，上下文提供语言与集成边界，聚合提供事务与不变量边界。二者是“语义小区”和“院子”的关系。
+
+**边界对齐**
+- **限界上下文（Bounded Context）**：统一语言与模型的“语义边界”，决定“我们在这里怎么说话、怎么集成”。跨上下文的协作用接口/事件。
+- **聚合（Aggregate）**：不变量的“事务边界”，决定“一次命令里哪些状态要么一起成要么一起败”。**一次事务只修改一个聚合**。
+
+**从外到内的三层次**
+1) 子域（业务能力切分，问题空间）
+2) 限界上下文（语言与模型边界，解决方案空间）
+3) 聚合（不变量与事务边界，代码与数据的一致性单元）
+
+**协作方式**
+- **上下文之间**：通过已发布语言（Schema/事件）或 Open Host Service 协作，必要时以 ACL 翻译语义。
+- **上下文内部，聚合之间**：通过领域事件或应用服务编排，避免跨聚合直接写入。
+
+**常见误区与纠偏**
+- 误区：把“聚合”当成“微服务”。纠偏：微服务是部署形态，聚合是领域不变量的建模单元。
+- 误区：跨聚合做大事务。纠偏：一个事务只写一个聚合；跨聚合用事件 + 补偿。
+- 误区：把上下文的“表”当作聚合边界。纠偏：以不变量而不是表结构决定聚合。
+
+**检查清单**
+- 所有聚合均能明确说出至少三条不变量，并证明这些不变量只依赖聚合内的状态。
+- 任何跨上下文/跨聚合的调用都可以**独立失败**而不破坏不变量，且具备重放/补偿路径。
+
 ### 第 2 章：设计与实现聚合
 
 #### 2.1 怎么把“院子”画出来：从不变量出发的 6 步法
@@ -498,6 +524,143 @@ func (t *Trip) AssignDriver(d DriverID, eta ETA, now time.Time) error {
 
 
 
+### 第 4 章：Go 项目中的 DDD 落地与目录结构
+
+这一章回答三个落地问题：
+1) 子域/上下文/聚合在 Go 项目中如何映射到目录与代码
+2) 聚合、应用服务、仓储分别放哪
+3) 新手常见易混点的“十秒分辨法”
+
+#### 4.1 目录结构：以“限界上下文”为第一层
+
+推荐将**每个限界上下文**作为 `internal/<context>` 下面的一个包（或模块）。上下文内再分层为 `domain / app / infra / interfaces`。
+
+```
+/internal
+  /trip               # 限界上下文：行程编排
+    /domain           # 领域层：实体、值对象、聚合、领域服务、事件
+      trip.go
+      assignment.go
+      money.go
+      events.go
+      errors.go
+      repository.go   # 仓储接口：以聚合为单位
+      service.go      # 领域服务（跨聚合的纯领域规则）
+    /app              # 应用层：用例编排（无业务规则）
+      commands.go     # 命令/用例 DTO
+      trip_service.go # Load→Call→Save→Publish
+      dto.go
+    /infra            # 基础设施：实现仓储、消息总线、外部适配器
+      repo_sql.go
+      eventbus_kafka.go
+      acl_payment.go  # 对接第三方的防腐层
+    /interfaces       # 传输层/适配层：HTTP/GRPC/GraphQL handler
+      http_handler.go
+      grpc_handler.go
+
+  /pricing            # 另一个上下文：动态定价
+    /domain ...
+    /app ...
+    /infra ...
+```
+
+**映射关系速查**
+- 子域：组织视角的集合，可能包含多个上下文（多个目录）。
+- 限界上下文：`/internal/<context>` 一级目录。
+- 聚合：`/internal/<context>/domain/*.go` 中的类型与方法集合；**不是一个独立目录必须项**，用文件与类型组织更灵活。
+
+#### 4.2 代码骨架：聚合、仓储与应用服务
+
+**聚合根示例**
+```go
+// internal/trip/domain/trip.go
+package domain
+type TripID string
+type Status int
+const (
+	Requested Status = iota; Assigned; EnRoute; Completed; Cancelled
+)
+type Trip struct {
+	id      TripID
+	status  Status
+	assign  *Assignment
+	fare    Money
+	events  []interface{} // 领域事件收集器（Outbox）
+}
+func NewTrip(id TripID) *Trip { return &Trip{id: id, status: Requested} }
+func (t *Trip) AssignDriver(d DriverID, eta ETA, now time.Time) error {
+	if t.status != Requested && t.status != Assigned { return ErrInvalidState }
+	if t.assign != nil && t.assign.IsActive { return ErrAlreadyAssigned }
+	t.assign = &Assignment{Driver: d, ETA: eta, IsActive: true}
+	t.status = Assigned
+	t.raise(DriverAssigned{Trip: t.id, Driver: d, At: now})
+	return nil
+}
+func (t *Trip) Complete(at time.Time) error {
+	if t.status != EnRoute && t.status != Assigned { return ErrInvalidState }
+	t.status = Completed
+	t.raise(TripCompleted{Trip: t.id, At: at, Fare: t.fare})
+	return nil
+}
+func (t *Trip) raise(e interface{}) { t.events = append(t.events, e) }
+func (t *Trip) PullEvents() []interface{} { es := t.events; t.events = nil; return es }
+```
+
+**仓储接口（按聚合）**
+```go
+// internal/trip/domain/repository.go
+package domain
+type TripRepository interface {
+	Get(ctx context.Context, id TripID) (*Trip, error)
+	Save(ctx context.Context, t *Trip) error // 一次事务只保存一个聚合
+}
+```
+
+**应用服务编排**
+```go
+// internal/trip/app/trip_service.go
+package app
+type TripService struct {
+	repo domain.TripRepository
+	bus  EventBus // 发布到消息总线的抽象
+}
+func (s *TripService) AssignDriver(ctx context.Context, cmd AssignDriverCmd) error {
+	tr, err := s.repo.Get(ctx, cmd.TripID); if err != nil { return err }
+	if err := tr.AssignDriver(cmd.DriverID, cmd.ETA, time.Now()); err != nil { return err }
+	if err := s.repo.Save(ctx, tr); err != nil { return err }
+	return s.bus.Publish(ctx, tr.PullEvents()...)
+}
+```
+
+**接口边界**
+- `domain` 不依赖 `app/infra/interfaces`。
+- `app` 依赖 `domain`，但不反向。
+- `infra` 依赖 `domain` 与 `app` 的抽象，提供实现。
+- `interfaces` 只做协议转换与入站/出站适配。
+
+#### 4.3 新手常见易混点速查
+
+- **上下文 vs 微服务**：上下文是模型与语言边界；微服务是部署边界。一个上下文可先在单体内实现，成熟后再拆服务。
+- **聚合 vs 表**：聚合按不变量划边界；表是存储细节。一个聚合可跨多表。
+- **实体 vs 值对象**：实体有身份且可变；值对象无身份且不可变，参与计算与校验。
+- **领域服务 vs 应用服务**：领域服务仍是业务话语、可被聚合调用；应用服务只编排，不写规则。
+- **仓储 vs DAO**：仓储以“聚合作为单位”，返回领域对象；DAO 面向表。优先仓储。
+- **命令 vs 事件 vs 查询**：命令是意图（祈使）；事件是已发生的事实（过去式）；查询不改变状态。
+- **Saga vs Process Manager**：Saga 是补偿策略；Process Manager 是管理一段长流程的有状态组件，二者常结合使用。
+- **ACL vs 直连第三方 SDK**：ACL 先翻译外部语义，再进入领域；不要把第三方类型渗入 `domain`。
+- **接口滥用**：Go 中给行为多态定义接口，但不要为每个结构体都定义接口。以“需要替换/mock”的边界来决定接口。
+- **DTO vs 领域对象**：DTO 用于进出站与跨边界传输；不要把 DTO 带入 `domain`。
+
+#### 4.4 实施清单（Go）
+1. 第一层按上下文建目录；上下文内固定四层：`domain/app/infra/interfaces`。
+2. 先做模块化单体，等边界与契约稳定后再服务化。
+3. 一个事务只保存一个聚合；跨聚合靠事件。
+4. 所有对外发布的事件/Schema 版本化并向后兼容。
+5. 领域层无第三方类型与 SDK；接入统一走 ACL。
+6. 聚合级测试不连库；仓储用集成测试覆盖持久化细节。
+7. 应用服务内置超时、重试、熔断、隔离的默认策略（调用跨上下文时）。
+8. 为每个上下文维护术语表与禁用词清单，防止语言混淆。
+
 ## 第三部分：治理与反模式 —— 持续保持架构健康
 
 
@@ -600,6 +763,52 @@ func (t *Trip) AssignDriver(d DriverID, eta ETA, now time.Time) error {
 - **例**：Trip.AssignDriver/LockFare/Complete 取代“散装 if 脚本”。
 
 
+##### 贫血模型 vs 值对象：关键区别与边界
+
+**结论先行**：**贫血模型（Anemic Model）是一种反模式**，指“有数据没行为”的领域对象；**值对象（Value Object）是DDD的正当成员**，指“无身份、不可变、按值相等”的对象。两者不是一类东西，也不冲突。
+
+| 项      | 贫血模型（反模式）               | 值对象（正当成员）                     |
+|--------|-------------------------|-------------------------------|
+| 身份（ID） | 往往有ID（实体或表影子）           | 没有ID                          |
+| 可变性    | 可变，字段随处被改               | **不可变**，构造后只读                 |
+| 行为     | 缺失业务行为，只有 getter/setter | 有**纯计算行为**（如货币运算、坐标计算）但不改外部状态 |
+| 不变量    | 不负责守不变量                 | 常用于**承载规则**（如 Money 同币种相加）    |
+| 使用位置   | 产生规则下沉到应用脚本             | 作为**内层积木**被实体/聚合使用            |
+
+**Go 示例**
+
+值对象（不可变）：
+```go
+// domain/money.go
+package domain
+type Money struct {
+	amount   int64  // 分
+	currency string // ISO 代码
+}
+func NewMoney(amount int64, currency string) (Money, error) {
+	if amount < 0 { return Money{}, ErrNegativeAmount }
+	if currency == "" { return Money{}, ErrInvalidCurrency }
+	return Money{amount: amount, currency: currency}, nil
+}
+func (m Money) Add(o Money) (Money, error) {
+	if m.currency != o.currency { return Money{}, ErrCurrencyMismatch }
+	return Money{amount: m.amount + o.amount, currency: m.currency}, nil
+}
+```
+
+贫血模型（反例）：
+```go
+// 应用层脚本里到处 UpdateXXX，聚合不守不变量
+type Trip struct { Status string; Fare int64 }
+// setter 没守任何规则
+func (t *Trip) SetStatus(s string) { t.Status = s }
+func (t *Trip) SetFare(v int64)    { t.Fare = v }
+```
+
+**如何避免贫血**
+- 把会触发不变量检查的行为移入**聚合根方法**（如 `Trip.AssignDriver/Complete`）。
+- 应用服务只做编排（Load→Call→Save→Publish），不写规则。
+- 值对象只做纯计算与校验，保持不可变。
 
 ##### 通用语言失效（同词不同义且未隔离）
 
