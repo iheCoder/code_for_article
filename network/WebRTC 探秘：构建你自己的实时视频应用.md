@@ -16,7 +16,7 @@ WebRTC 的核心价值主张在于，它彻底消除了在 Web 端实现实时�
 
 WebRTC 旨在解决的核心挑战是，在充满不可预测性和网络限制的公共互联网拓扑中，如何在两个终端（即“对等端”或“Peer”）之间建立直接、低延迟的通信信道。这些信道专为音频、视频以及任意数据的传输而设计，构成了现代通信应用的基石。在理想的网络条件下，WebRTC 的延迟通常在 100-300 毫秒之间，完全满足实时互动的要求。
 
-值得强调的是，安全性在 WebRTC 的设计中并非事后添加的补充，而是一项强制性的内置特性。所有 WebRTC 通信都必须进行端到端加密（使用 DTLS 和 SRTP 协议），以确保通信的私密性和数据完整性。
+值得强调的是，安全性在 WebRTC 的设计中并非事后添加的补充，而是一项强制性的内置特性。所有 WebRTC 通信都必须进行加密传输（使用 DTLS 和 SRTP 协议）以确保链路上的机密性与完整性。若要实现真正的端到端加密（即服务器也无法看到明文，在使用 SFU 等中间节点时仍保持加密），需要结合 Insertable Streams/SFrame 在应用层实现额外的端到端加密。
 
 
 
@@ -65,9 +65,9 @@ SDP（Session Description Protocol）是一种基于文本的格式，其作用�
 - **加密算法：** 指定用于保护媒体流安全的加密套件（如 DTLS-SRTP）。
 - **网络信息：** （在传统 ICE 模式下）包含用于接收媒体的 IP 地址和端口信息。
 
-WebRTC 采用了一种在 RFC 3264 中标准化的“提议/应答”（Offer/Answer）模型来进行媒体协商。其流程如下：一方（提议方，Offerer）生成一个包含其期望会话配置的 SDP
+WebRTC 采用了一种在 RFC 3264 中标准化的“提议/应答”（Offer/Answer）模型来进行媒体协商。其流程如下：一方（提议方，Offerer）生成一个包含其期望会话配置的 SDP `offer`；另一方（应答方，Answerer）在收到 `offer` 后，生成一个 SDP `answer` 作为回应，其中包含了它所能支持的兼容配置。通过这一来一回的交换，双方就本次通信的技术细节（如使用哪种编解码器）达成了一致。
 
-`offer`；另一方（应答方，Answerer）在收到 `offer` 后，生成一个 SDP `answer` 作为回应，其中包含了它所能支持的兼容配置。通过这一来一回的交换，双方就本次通信的技术细节（如使用哪种编解码器）达成了一致。
+此外，现代 WebRTC 实践通常配合 BUNDLE 与 RTCP-mux，将多路媒体复用在单一传输之上，m= 行端口常为占位的 9，具体可用地址与端口主要通过 ICE 候选者在信令过程中逐步交换（Trickle ICE）。因此，SDP 本体更多承载“媒体合同”（编解码能力、方向性、复用策略），而非固定的网络寻址信息。
 
 
 
@@ -93,7 +93,9 @@ WebRTC 采用了一种在 RFC 3264 中标准化的“提议/应答”（Offer/An
 - **机制：** 当 P2P 连接尝试失败时，通信双方会各自连接到 TURN 服务器。客户端会在 TURN 服务器上被分配一个“中继传输地址”（Relayed Transport Address），并将其告知通信对端。此后，所有媒体数据包都将通过 TURN 服务器进行转发。
 - **权衡：** TURN 能够保证在最复杂的网络环境下也能建立连接，但这是有代价的。首先，媒体数据需要经过服务器中转，增加了额外的网络跳数，从而提高了延迟。其次，由于需要处理所有媒体流，TURN 服务器会消耗大量的带宽和计算资源，其运营和扩展成本远高于 STUN 服务器。
 
-STUN 和 TURN 之间的选择不仅仅是 ICE 算法在技术层面的决策，它对任何 WebRTC 服务的提供商都具有深远的经济和架构影响。STUN 服务器是无状态、轻量级的，运营成本极低。相比之下，TURN 服务器必须为每个会话中继每一个媒体数据包，这需要巨大的、持续的带宽，强大的 CPU 处理能力，以及战略性的全球地理分布以最小化延迟，使其运营成本非常高昂。研究表明，尽管大部分（约 86%）的 WebRTC 通话可以通过 STUN 成功建立，但仍有不可忽视的一部分（约 10-20%）需要依赖 TURN 作为后备。因此，一个商业化的 WebRTC 服务架构必须将这部分可变成本纳入考量，因为它会随着用户活跃度和通话时长的增加而线性增长。这直接引出了一系列关键的架构决策：是应该为了完全控制而自建 TURN 服务器（例如使用开源的 `coturn` ），还是应该利用托管的云服务来获得全球规模和高可靠性？这个考量将底层的网络协议（ICE）与高层的商业战略和运营支出紧密地联系在了一起。
+STUN 和 TURN 之间的选择不仅仅是 ICE 算法在技术层面的决策，它对任何 WebRTC 服务的提供商都具有深远的经济和架构影响。STUN 服务器是无状态、轻量级的，运营成本较低；而 TURN 服务器需要为会话中继媒体数据，带来显著的带宽与部署成本，并需要在全球多点就近部署以降低时延。
+
+在实际互联网环境中，多数会话可通过直连（含 STUN 协助）成功，但仍有一部分会话在对称 NAT、企业防火墙或严格代理环境下需要 TURN 兜底。该比例会随用户地区、网络形态与业务人群而变化，无法一概而论。工程上应按“最坏情况可用”的原则，规划并容量评估 TURN，以保证在直连失败时仍能建立连接。这直接引出了一系列关键的架构决策：自建（如 `coturn`）以获得可控性与成本可预期，或采用托管云服务以快速获得全球可用性与弹性。
 
 
 
@@ -211,8 +213,19 @@ SDP 提议/应答交换和 ICE 候选者交换并非两个完全独立的顺序�
 通过 `new RTCPeerConnection(configuration)` 来创建一个新的连接实例。`configuration` 是一个可选的对象，其中最重要的参数是 `iceServers` 数组。该数组用于指定应用可以使用的 STUN 和 TURN 服务器的地址及认证凭据。
 
 ```javascript
+// WebRTC 连接配置：建议提供 STUN，并为生产环境准备 TURN 兜底
+// - STUN：仅用于发现公网可达地址，不中继媒体，成本低
+// - TURN：在直连失败时中继媒体，需规划带宽与全球部署
 const configuration = {
-  iceServers:
+  iceServers: [
+    // 公共 STUN（示例）；生产建议自建或使用可信托管服务
+    { urls: ["stun:stun.l.google.com:19302"] },
+    // 生产环境通常需要配置 TURN（UDP/TCP/TLS 三栈）作为兜底：
+    // { urls: ["turn:turn.example.com:3478"], username: "user", credential: "pass" },
+    // { urls: ["turns:turn.example.com:5349"], username: "user", credential: "pass" },
+  ],
+  // 可选：预聚合 ICE 候选，通常保持 0 使用 Trickle ICE 实时收集
+  // iceCandidatePoolSize: 0,
 };
 const pc = new RTCPeerConnection(configuration);
 ```
@@ -273,21 +286,21 @@ const pc = new RTCPeerConnection(configuration);
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WebRTC 1-on-1 Video Call</title>
+   <title>WebRTC 1-on-1 Video Call</title>
 </head>
 <body>
-    <h1>WebRTC Demo</h1>
-    <div>
-        <h2>Local Video</h2>
-        <video id="localVideo" autoplay muted playsinline></video>
-    </div>
-    <div>
-        <h2>Remote Video</h2>
-        <video id="remoteVideo" autoplay playsinline></video>
-    </div>
-    <button id="startButton">Start</button>
-    <button id="callButton">Call</button>
-    <button id="hangupButton">Hang Up</button>
+<h1>WebRTC Demo</h1>
+<div>
+   <h2>Local Video</h2>
+   <video id="localVideo" autoplay muted playsinline></video>
+</div>
+<div>
+   <h2>Remote Video</h2>
+   <video id="remoteVideo" autoplay playsinline></video>
+</div>
+<button id="startButton">Start</button>
+<button id="callButton">Call</button>
+<button id="hangupButton">Hang Up</button>
 </body>
 </html>
 ```
@@ -304,16 +317,19 @@ const pc = new RTCPeerConnection(configuration);
 // 假设的信令通道实现 (在真实应用中，这会是 WebSocket 或其他通信机制)
 // 这是一个事件驱动的模拟对象，用于演示信令逻辑
 class SignalingChannel extends EventTarget {
-    send(message) {
-        console.log('Sending message:', message);
-        // 在真实应用中，这里会通过 WebSocket 发送 JSON.stringify(message)
-        // 为了演示，我们模拟对方接收并立即触发 onmessage
-        setTimeout(() => {
-            // 这是一个简化的模拟，实际应用中消息会发往远端
-            // 这里的 onmessage 应该在远端客户端被触发
-            // this.dispatchEvent(new MessageEvent('message', { data: message }));
-        }, 100);
-    }
+   send(message) {
+      console.log('Sending message:', message);
+      // 在真实应用中，这里会通过 WebSocket 发送 JSON.stringify(message)
+      // 为了演示，我们在本地模拟“远端接收”，并触发事件与 onmessage 回调
+      setTimeout(() => {
+         // 事件派发（推荐）：允许使用 addEventListener('message', ...)
+         this.dispatchEvent(new MessageEvent('message', { data: message }));
+         // 兼容属性式回调：允许使用 signaling.onmessage = (event) => {...}
+         if (typeof this.onmessage === 'function') {
+           this.onmessage(new MessageEvent('message', { data: message }));
+         }
+      }, 100);
+   }
 }
 
 const signaling = new SignalingChannel();
@@ -329,7 +345,13 @@ const remoteVideo = document.getElementById('remoteVideo');
 let localStream;
 let pc;
 const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-const constraints = { audio: true, video: true };
+// 建议的媒体约束：提升语音通话质量并控制初始视频档位
+// - 音频：开启回声消除、降噪与自动增益
+// - 视频：设置理想分辨率与帧率，避免过高码率导致连通性初期不稳定
+const constraints = {
+  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
+};
 
 // 按钮事件监听
 startButton.onclick = start;
@@ -338,101 +360,123 @@ hangupButton.onclick = hangup;
 
 // 1. 开始：获取本地媒体流
 async function start() {
-    console.log('Requesting local stream');
-    startButton.disabled = true;
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        localVideo.srcObject = localStream;
-        callButton.disabled = false;
-    } catch (e) {
-        console.error('getUserMedia() error: ', e);
-    }
+   console.log('Requesting local stream');
+   startButton.disabled = true;
+   try {
+      localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      localVideo.srcObject = localStream;
+      callButton.disabled = false;
+   } catch (e) {
+      console.error('getUserMedia() error: ', e);
+   }
 }
 
 // 2. 呼叫：创建 PeerConnection 并发起提议
 async function call() {
-    callButton.disabled = true;
-    hangupButton.disabled = false;
-    console.log('Starting call');
+   callButton.disabled = true;
+   hangupButton.disabled = false;
+   console.log('Starting call');
 
-    pc = new RTCPeerConnection(configuration);
+   pc = new RTCPeerConnection(configuration);
 
-    // 将本地媒体轨道添加到 PeerConnection
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+   // 将本地媒体轨道添加到 PeerConnection
+   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-    // 监听 ICE 候选者事件
-    pc.onicecandidate = event => {
-        if (event.candidate) {
-            // 将候选者通过信令服务器发送给对方
-            signaling.send({ candidate: event.candidate });
-        }
-    };
+   // 监听 ICE 候选者事件（Trickle ICE）
+   pc.onicecandidate = event => {
+      // 候选者会在收集到后被“涓滴”发送给对端
+      // 当 candidate 为 null 时，表示本端候选收集完成，可发送结束标志
+      signaling.send({ candidate: event.candidate || null });
+   };
 
-    // 监听远端媒体轨道事件
-    pc.ontrack = event => {
-        if (remoteVideo.srcObject!== event.streams) {
-            remoteVideo.srcObject = event.streams;
-            console.log('Received remote stream');
-        }
-    };
-    
-    // 监听连接状态变化
-    pc.onconnectionstatechange = (event) => {
-        console.log(`Connection state change: ${pc.connectionState}`);
-    };
+   // 监听远端媒体轨道事件
+   pc.ontrack = event => {
+      // event.streams 是数组；常见场景只需取第一路流
+      const [remoteStream] = event.streams;
+      if (remoteVideo.srcObject !== remoteStream) {
+        remoteVideo.srcObject = remoteStream;
+        console.log('Received remote stream');
+      }
+   };
 
-    // 创建提议 (Offer)
-    try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        // 将提议通过信令服务器发送给对方
-        signaling.send({ desc: offer });
-    } catch (e) {
-        console.error('Failed to create session description: ', e);
-    }
+   // 监听连接状态变化
+   pc.onconnectionstatechange = (event) => {
+      console.log(`Connection state change: ${pc.connectionState}`);
+   };
+
+   // 可选：使用 onnegotiationneeded 触发“完美协商”（避免在状态不稳定时重复发起）
+   // 提示：当前示例已在下方主动发起了一次 createOffer；若开启本段，需去掉下方主动发起逻辑
+   // pc.onnegotiationneeded = async () => {
+   //   try {
+   //     if (pc.signalingState !== 'stable') return; // 防止在 glare 或重入时重复发起
+   //     const offer = await pc.createOffer();
+   //     await pc.setLocalDescription(offer);
+   //     signaling.send({ desc: pc.localDescription });
+   //   } catch (e) {
+   //     console.error('onnegotiationneeded failed: ', e);
+   //   }
+   // };
+
+   // 创建提议 (Offer) 并触发协商
+   try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      // 将提议通过信令服务器发送给对方
+      // 注意：使用 pc.localDescription 可确保发送的是可能被封装后的描述
+      signaling.send({ desc: pc.localDescription });
+   } catch (e) {
+      console.error('Failed to create session description: ', e);
+   }
 }
 
 // 3. 挂断
 function hangup() {
-    console.log('Ending call');
-    pc.close();
-    pc = null;
-    hangupButton.disabled = true;
-    callButton.disabled = false;
+   console.log('Ending call');
+   pc.close();
+   pc = null;
+   hangupButton.disabled = true;
+   callButton.disabled = false;
 }
 
 // 4. 处理信令消息
+// 可使用 addEventListener 或 onmessage；这里保留 onmessage 以便示例最简
 signaling.onmessage = async (event) => {
-    // 在真实应用中，这里会解析从 WebSocket 收到的消息
-    // const message = JSON.parse(event.data);
-    const { desc, candidate } = event.data; // 模拟直接接收对象
+   // 在真实应用中，这里会解析从 WebSocket 收到的消息
+   // const message = JSON.parse(event.data);
+   const { desc, candidate } = event.data; // 模拟直接接收对象
 
-    try {
-        if (desc) {
-            // 如果是提议 (Offer)，创建应答 (Answer)
-            if (desc.type === 'offer') {
-                await pc.setRemoteDescription(desc);
-                // 在接收方，也需要获取本地媒体流并添加到连接中
-                // (在这个简化的单页面示例中，我们假设 localStream 已经存在)
-                // if (!localStream) await start();
-                // localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-                
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                signaling.send({ desc: answer });
-            } else if (desc.type === 'answer') {
-                // 如果是应答 (Answer)，设置远端描述
-                await pc.setRemoteDescription(desc);
-            } else {
-                console.log('Unsupported SDP type.');
-            }
-        } else if (candidate) {
-            // 如果是 ICE 候选者，添加到 PeerConnection
-            await pc.addIceCandidate(candidate);
-        }
-    } catch (e) {
-        console.error('Error handling signaling message: ', e);
-    }
+   try {
+      if (desc) {
+         // 如果是提议 (Offer)，创建应答 (Answer)
+         if (desc.type === 'offer') {
+            await pc.setRemoteDescription(desc);
+            // 在接收方，也需要获取本地媒体流并添加到连接中
+            // (在这个简化的单页面示例中，我们假设 localStream 已经存在)
+            // if (!localStream) await start();
+            // localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            signaling.send({ desc: pc.localDescription });
+         } else if (desc.type === 'answer') {
+            // 如果是应答 (Answer)，设置远端描述
+            await pc.setRemoteDescription(desc);
+         } else {
+            console.log('Unsupported SDP type.');
+         }
+      } else if (candidate !== undefined) {
+         // 如果是 ICE 候选者，添加到 PeerConnection
+         // candidate 为 null 时表示对端候选收集完毕，可选择调用 end-of-candidates 标志
+         if (candidate) {
+           await pc.addIceCandidate(candidate);
+         } else {
+           // 可选：结束信号；某些实现会自动处理
+           // await pc.addIceCandidate(null);
+         }
+      }
+   } catch (e) {
+      console.error('Error handling signaling message: ', e);
+   }
 };
 ```
 
@@ -447,13 +491,13 @@ const socket = new WebSocket('wss://your-signaling-server.com');
 
 // 发送消息
 function sendSignalingMessage(message) {
-    socket.send(JSON.stringify(message));
+   socket.send(JSON.stringify(message));
 }
 
 // 接收消息
 socket.onmessage = async (event) => {
-    const message = JSON.parse(event.data);
-    //... 之后是处理 desc 和 candidate 的逻辑
+   const message = JSON.parse(event.data);
+   //... 之后是处理 desc 和 candidate 的逻辑
 };
 ```
 
@@ -463,6 +507,6 @@ socket.onmessage = async (event) => {
 
 ## 结论：实时 Web 应用的未来
 
-WebRTC 是一项功能强大的技术，它通过提供一套标准化的原生 API，成功地将无插件、端到端加密的点对点实时通信能力赋予了 Web 平台。它不仅是现代视频会议、在线协作和即时通讯应用的基石，也为去中心化网络和物联网等前沿领域开辟了新的可能性。
+WebRTC 是一项功能强大的技术，它通过提供一套标准化的原生 API，成功地将无插件、强制加密（DTLS/SRTP）的点对点实时通信能力赋予了 Web 平台。对于真正的端到端加密需求，可结合 Insertable Streams/SFrame 在应用层实现。它不仅是现代视频会议、在线协作和即时通讯应用的基石，也为去中心化网络和物联网等前沿领域开辟了新的可能性。
 
 然而，这种强大能力的背后是显著的架构复杂性。开发者必须深刻理解，WebRTC 并非一个即插即用的解决方案，而是需要精心设计和部署配套基础设施的框架。一个健壮的 WebRTC 应用离不开一个高效、可靠的信令服务器，以及一个能够应对各种复杂网络环境的、包含 STUN 和 TURN 服务器的 NAT 穿透解决方案。
