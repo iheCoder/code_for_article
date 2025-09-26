@@ -66,7 +66,6 @@ func TestForgetCloseBody_ConnectionLeak(t *testing.T) {
 		// 直接失败提示：也许运行环境已主动关闭连接或代理改写
 		// 这种情况极少见
 		// 这里仍给出失败，提醒读者测试环境差异
-		// 但不 return 继续对比好例子
 		// t.Fatalf("意外: 未复现连接泄漏 (新连接=1)")
 	}
 
@@ -435,6 +434,9 @@ func TestTransportConnectionPoolReuseAcrossBursts(t *testing.T) {
 	burst := 20
 	waves := 3
 	runWaves := func(tr *http.Transport) (totalNew []int32) {
+		// 注意：atomic 计数器 newConn 在每一波开始前都会被重置为 0，
+		// 所以 append 的是“该波中新建的连接数”，而不是累计值，也不是波次数。
+		// 这样得到的 slice 例如 [20 3 2] 表示：第一波全新建 20，第二波只需 3 个新增（其余复用前一波空闲），第三波再新增 2 个。
 		client := &http.Client{Transport: tr}
 		for w := 0; w < waves; w++ {
 			atomic.StoreInt32(&newConn, 0)
