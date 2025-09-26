@@ -26,7 +26,9 @@ func newCountingServer(handler http.Handler) (*httptest.Server, *int32) {
 			atomic.AddInt32(&newConn, 1)
 		}
 	}
+
 	ts.Start()
+
 	return ts, &newConn
 }
 
@@ -67,6 +69,7 @@ func TestForgetCloseBody_ConnectionLeak(t *testing.T) {
 		// 但不 return 继续对比好例子
 		// t.Fatalf("意外: 未复现连接泄漏 (新连接=1)")
 	}
+
 	// 打印结果供观察
 	if testing.Verbose() {
 		fmt.Printf("[坏例] 总请求=%d 新建连接=%d\n", N, opened)
@@ -74,6 +77,7 @@ func TestForgetCloseBody_ConnectionLeak(t *testing.T) {
 }
 
 // 好例子：及时关闭（若不关心 body 内容可直接 Close；若需要复用连接前读取/丢弃完剩余内容）
+// 运行结果： [好例] 总请求=15 新建连接=1
 func TestProperCloseBody_ConnectionReuse(t *testing.T) {
 	const N = 15
 	server, counter := newCountingServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +85,7 @@ func TestProperCloseBody_ConnectionReuse(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// 使用同一个客户端（共享连接池）
 	client := &http.Client{}
 	for i := 0; i < N; i++ {
 		resp, err := client.Get(server.URL)
@@ -90,17 +95,22 @@ func TestProperCloseBody_ConnectionReuse(t *testing.T) {
 		io.Copy(io.Discard, resp.Body) // 保障连接放回池
 		resp.Body.Close()
 	}
+
+	// 等待调度，让 ConnState 能统计完全
 	time.Sleep(100 * time.Millisecond)
 	opened := atomic.LoadInt32(counter)
 	if opened >= N { // 复用应该显著少于请求数，一般为 1
 		t.Fatalf("期望显著少于 %d 的新建连接, 实际=%d (未体现复用)", N, opened)
 	}
+
+	// 打印结果供观察
 	if testing.Verbose() {
 		fmt.Printf("[好例] 总请求=%d 新建连接=%d\n", N, opened)
 	}
 }
 
 // 局部读取后直接 Close 而不 Drain：连接被标记不可复用 -> 每次新建
+// 运行结果示例（可能有波动）: [部分读取坏例] 总请求=10 新建连接=10
 func TestPartialReadWithoutDrain(t *testing.T) {
 	const N = 10
 	body := bytes.Repeat([]byte("a"), 64*1024) // 足够大，确保还留未读数据
@@ -109,6 +119,7 @@ func TestPartialReadWithoutDrain(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// 使用同一个客户端（共享连接池）
 	client := &http.Client{}
 	for i := 0; i < N; i++ {
 		resp, err := client.Get(server.URL)
@@ -119,18 +130,23 @@ func TestPartialReadWithoutDrain(t *testing.T) {
 		_, _ = resp.Body.Read(buf) // 只读一小段
 		resp.Body.Close()          // 提前关闭（底层连接会被丢弃）
 	}
+
+	// 等待调度，让 ConnState 能统计完全
 	time.Sleep(120 * time.Millisecond)
 	opened := atomic.LoadInt32(counter)
 	if opened < N {
 		// 理论上应接近 N
 		// t.Logf("警告: 未完全复现，每次 partial read 期望新建连接≈%d 实际=%d", N, opened)
 	}
+
+	// 打印结果供观察
 	if testing.Verbose() {
 		fmt.Printf("[部分读取坏例] 总请求=%d 新建连接=%d\n", N, opened)
 	}
 }
 
 // 对比：读取并丢弃剩余数据再 Close，可复用
+// 运行结果示例（可能有波动）: [部分读取好例] 总请求=10 新建连接=1
 func TestDrainThenClose(t *testing.T) {
 	const N = 10
 	body := bytes.Repeat([]byte("a"), 64*1024)
@@ -139,6 +155,7 @@ func TestDrainThenClose(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// 使用同一个客户端（共享连接池）
 	client := &http.Client{}
 	for i := 0; i < N; i++ {
 		resp, err := client.Get(server.URL)
@@ -151,11 +168,14 @@ func TestDrainThenClose(t *testing.T) {
 		io.Copy(io.Discard, resp.Body) // 关键：把剩下的读完
 		resp.Body.Close()
 	}
+
+	// 等待调度，让 ConnState 能统计完全
 	time.Sleep(120 * time.Millisecond)
 	opened := atomic.LoadInt32(counter)
 	if opened >= N { // 期望显著小于 N
 		t.Fatalf("期望连接复用 (新建<%d), 实际=%d", N, opened)
 	}
+
 	if testing.Verbose() {
 		fmt.Printf("[部分读取好例] 总请求=%d 新建连接=%d\n", N, opened)
 	}
@@ -210,6 +230,7 @@ func TestStreamVsReadAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}
+
 	// 不推荐：一次性全部读入（真实场景里可能是数十 MB 乃至 GB）
 	b, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -249,6 +270,7 @@ func TestGoroutineBaseline(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("PING"))
 	}))
+
 	client := &http.Client{}
 	for i := 0; i < 5; i++ {
 		resp, err := client.Get(server.URL)
@@ -259,6 +281,7 @@ func TestGoroutineBaseline(t *testing.T) {
 		resp.Body.Close()
 	}
 	server.Close()
+
 	// 等待后台 goroutine 回收
 	for i := 0; i < 10; i++ {
 		if runtime.NumGoroutine() <= before+2 { // 允许少量波动
@@ -276,6 +299,8 @@ func TestHandlerRespectsContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&active, 1)
 		defer atomic.AddInt32(&active, -1)
+
+		// 模拟长时间任务
 		ctx := r.Context()
 		select {
 		case <-time.After(500 * time.Millisecond):
@@ -286,6 +311,8 @@ func TestHandlerRespectsContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// 使用 50ms 超时的 context 发起请求
+	// 任务本身需要 500ms，预期被取消
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
@@ -295,6 +322,9 @@ func TestHandlerRespectsContextCancellation(t *testing.T) {
 		// 由于 50ms 超时 < 500ms 任务，预期 err!=nil (context deadline)
 		// 但极少情况下计时竞争；忽略
 	}
+
+	// 等待最多 300ms 让 handler goroutine 退出
+	// （若不退出则说明未监听 ctx.Done()）
 	deadline := time.Now().Add(300 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if atomic.LoadInt32(&active) == 0 { // goroutine 已退出
@@ -302,6 +332,7 @@ func TestHandlerRespectsContextCancellation(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	// 如果到期仍未退出则失败
 	if atomic.LoadInt32(&active) != 0 {
 		// 说明 handler 未监听 ctx.Done()
@@ -319,10 +350,15 @@ func TestHandlerRespectsContextCancellation(t *testing.T) {
 // ============= 2.x 连接池配置对比 =============
 // 对比：低 MaxIdleConnsPerHost + 并发突发 vs 高配置。
 // 统计新建连接数（近似指标，强调趋势不追求绝对稳定）。
+// 结果示例（可能有波动）: 低配置新建连接=30 高配置新建连接=30
 func TestTransportConnectionPoolTuning(t *testing.T) {
 	if testing.Short() {
 		t.Skip("短测试模式下跳过")
 	}
+
+	// 服务器端记录新建连接数
+	// 理论上高配置应更少，但受调度等影响可能有波动
+	// 这里不强制失败，只记录（若反向则提示）
 	var newConn int32
 	hs := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("OK"))
@@ -332,9 +368,12 @@ func TestTransportConnectionPoolTuning(t *testing.T) {
 			atomic.AddInt32(&newConn, 1)
 		}
 	}
+
+	// 启动服务器
 	hs.Start()
 	defer hs.Close()
 
+	// 并发突发请求
 	burst := 30
 	doBurst := func(tr *http.Transport) int32 {
 		atomic.StoreInt32(&newConn, 0)
@@ -348,6 +387,7 @@ func TestTransportConnectionPoolTuning(t *testing.T) {
 				if err != nil {
 					return
 				}
+
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 			}()
@@ -370,17 +410,93 @@ func TestTransportConnectionPoolTuning(t *testing.T) {
 	// 低配置应该 >= 高配置 (或相等，视 TCP 建立/复用竞争)；若反向则提示
 	if lowCount+2 < highCount { // 允许少量波动
 		// 不直接失败，记录（调度差异可能）
-		// t.Logf("意外：高配置反而更多 newConn low=%d high=%d", lowCount, highCount)
+		t.Logf("意外：高配置反而更多 newConn low=%d high=%d", lowCount, highCount)
+	}
+}
+
+// 改进：多波次突发来体现连接池参数差异（第二/三波才有可复用的空闲连接）。
+func TestTransportConnectionPoolReuseAcrossBursts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("短测试模式下跳过")
+	}
+
+	var newConn int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("OK"))
+	}))
+	server.Config.ConnState = func(c net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			atomic.AddInt32(&newConn, 1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	burst := 20
+	waves := 3
+	runWaves := func(tr *http.Transport) (totalNew []int32) {
+		client := &http.Client{Transport: tr}
+		for w := 0; w < waves; w++ {
+			atomic.StoreInt32(&newConn, 0)
+			var wg sync.WaitGroup
+			wg.Add(burst)
+			for i := 0; i < burst; i++ {
+				go func() {
+					defer wg.Done()
+
+					resp, err := client.Get(server.URL)
+					if err != nil {
+						return
+					}
+
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+				}()
+			}
+			wg.Wait()
+
+			// 等待连接进入空闲池
+			time.Sleep(80 * time.Millisecond)
+			cnt := atomic.LoadInt32(&newConn)
+			totalNew = append(totalNew, cnt)
+		}
+		return
+	}
+
+	low := &http.Transport{MaxIdleConnsPerHost: 1, MaxIdleConns: 1, IdleConnTimeout: time.Second}
+	high := &http.Transport{MaxIdleConnsPerHost: 50, MaxIdleConns: 200, IdleConnTimeout: time.Second}
+
+	lowWave := runWaves(low)
+	highWave := runWaves(high)
+
+	if testing.Verbose() {
+		fmt.Printf("低配置各波新建=%v 高配置各波新建=%v\n", lowWave, highWave)
+	}
+
+	// 断言：第二/三波，高配置应显著少于低配置（允许偶发抖动）
+	if len(lowWave) == waves && len(highWave) == waves {
+		for w := 1; w < waves; w++ {
+			if highWave[w] > lowWave[w]-2 { // 允许 2 个抖动
+				// 不直接失败（受时序/平台影响），但标记说明（可根据需要改为失败）
+				t.Logf("波次 %d: 期望高配置更少 newConn, low=%d high=%d", w, lowWave[w], highWave[w])
+			}
+		}
 	}
 }
 
 // ============= 3.1/3.2 net.Conn 消息原子性 与 Deadline 误用 =============
 // 坏例：两个并发逻辑消息，每个分两次 Write，导致顺序可能交错。
+// 结果示例（可能有波动）: 观察到交错顺序："A-HB-HB-BA-B"
+// 解释：Write 调用本身是原子的，但应用的“逻辑消息”由两次 Write 组成：头 + 体。
+// Go 的调度在 msgA1 和 msgA2 之间切换到另一 Goroutine 执行 msgB1 / msgB2，
+// 最终字节流序列可能交错为：A-H B-H B-B A-B （或其它交错排列）。
+// 因此需要应用层锁把一条逻辑消息的多次 Write 串行化为一个临界区，实现消息原子性。
 func TestMessageInterleavingOnConn(t *testing.T) {
 	c1, c2 := net.Pipe() // c1 写 c2 读
 	defer c1.Close()
 	defer c2.Close()
 
+	// 两个逻辑消息 A 和 B，各分两次写入
 	msgA1, msgA2 := []byte("A-H"), []byte("A-B")
 	msgB1, msgB2 := []byte("B-H"), []byte("B-B")
 	var wg sync.WaitGroup
@@ -462,12 +578,14 @@ func TestReadDeadlineSingleShotPitfall(t *testing.T) {
 		t.Fatalf("第一次读取不应失败: %v", err)
 	}
 	_ = n
+
 	// 第二次：deadline 已过，写端再写
 	go func() { time.Sleep(55 * time.Millisecond); c1.Write([]byte("TWO")) }()
 	_, err = c2.Read(buf)
 	if err == nil {
 		t.Fatalf("预期第二次读取超时错误")
 	}
+
 	// 验证为超时
 	ne, ok := err.(net.Error)
 	if !ok || !ne.Timeout() {
@@ -481,6 +599,7 @@ func TestReadDeadlineRefreshPattern(t *testing.T) {
 	defer c1.Close()
 	defer c2.Close()
 
+	// 每次读前刷新 deadline
 	idle := 40 * time.Millisecond
 	readOnce := func(expect string) {
 		c2.SetReadDeadline(time.Now().Add(idle))
@@ -493,6 +612,8 @@ func TestReadDeadlineRefreshPattern(t *testing.T) {
 			t.Fatalf("期望 %s got %s", expect, string(buf[:n]))
 		}
 	}
+
+	// 三次写入，间隔小于 idle
 	go func() {
 		time.Sleep(5 * time.Millisecond)
 		c1.Write([]byte("ONE"))
@@ -517,6 +638,7 @@ func TestResponseHeaderTimeout(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	// 对比：默认客户端（无超时） vs ResponseHeaderTimeout
 	tr := &http.Transport{ResponseHeaderTimeout: 60 * time.Millisecond}
 	client := &http.Client{Transport: tr}
 	start := time.Now()
@@ -524,6 +646,10 @@ func TestResponseHeaderTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatalf("应因响应头超时失败")
 	}
+
+	// 验证为超时错误
+	// 注意某些版本包装为 *url.Error
+	// 这里不直接失败以免受版本影响
 	if ne, ok := err.(net.Error); !ok || !ne.Timeout() {
 		// 某些版本包装为 *url.Error
 		var uerr *url.Error
@@ -535,6 +661,7 @@ func TestResponseHeaderTimeout(t *testing.T) {
 			}
 		}
 	}
+
 	// 对比：放宽超时
 	tr2 := &http.Transport{ResponseHeaderTimeout: 300 * time.Millisecond}
 	client2 := &http.Client{Transport: tr2}
