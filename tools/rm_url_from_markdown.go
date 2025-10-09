@@ -15,10 +15,10 @@ type MarkdownCleaner struct {
 	urlRefRegex *regexp.Regexp
 	// 匹配错误转义的强调符号，如：\*
 	escapeStarRegex *regexp.Regexp
-	// 匹配 空格/Tab + 数字  (去除从网页/PDF 拷贝残留的编号、脚注等)
-	numberSpaceDigitsRegex *regexp.Regexp
 	// 匹配多余空格（两个及以上的空格）
 	multiSpaceRegex *regexp.Regexp
+	// 新增：匹配被整体转义期望退化为单星号的 \\** 模式
+	escapedDoubleStarToSingle *regexp.Regexp
 }
 
 // NewMarkdownCleaner 创建一个新的markdown清理器
@@ -28,11 +28,82 @@ func NewMarkdownCleaner() *MarkdownCleaner {
 		urlRefRegex: regexp.MustCompile(`\[[^\]]*\]\([^)]*\)`),
 		// 匹配转义的星号 \*
 		escapeStarRegex: regexp.MustCompile(`\\(\*)`),
-		// 匹配 空格/Tab + 数字  (去除从网页/PDF 拷贝残留的编号、脚注等)
-		numberSpaceDigitsRegex: regexp.MustCompile(`[\t ]+\d+`),
 		// 匹配多余空格（两个及以上的空格）
 		multiSpaceRegex: regexp.MustCompile(` {2,}`),
+		// 新增：匹配被整体转义期望退化为单星号的 \\** 模式
+		escapedDoubleStarToSingle: regexp.MustCompile(`\\\*{2}`),
 	}
+}
+
+// isLetterOrDigit 判断字母/数字/下划线
+func isLetterOrDigit(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_'
+}
+
+// isRemovalPunct 判断是否是可触发脚注数字移除的标点（包含中英文）
+func isRemovalPunct(r rune) bool {
+	switch r {
+	case '.', ',', '，', '。', '!', '?', ';', '；', ':', '：', ')', '）', ']', '】':
+		return true
+	}
+	return false
+}
+
+// removeFootnoteNumbers 使用 rune 级遍历移除形如 " 空格+数字+终止标点" 的脚注编号（终止标点后不能紧跟字母/数字；且不破坏版本号如 1.19, 单位如 250MB, 千位逗号 1,234, 结构 12,abc）
+func removeFootnoteNumbers(line string) string {
+	if len(line) == 0 {
+		return line
+	}
+	runes := []rune(line)
+	var out []rune
+	for i := 0; i < len(runes); {
+		// 匹配前导空白
+		if runes[i] == ' ' || runes[i] == '\t' {
+			spStart := i
+			j := i
+			for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t') {
+				j++
+			}
+			// 数字段
+			d := j
+			for d < len(runes) && runes[d] >= '0' && runes[d] <= '9' {
+				d++
+			}
+			if d > j && d < len(runes) { // 有数字且未到行尾
+				punct := runes[d]
+				if isRemovalPunct(punct) {
+					// 版本号保护：数字 + '.' + 数字
+					if punct == '.' && d+1 < len(runes) && runes[d+1] >= '0' && runes[d+1] <= '9' {
+						out = append(out, runes[spStart:d+1]...)
+						i = d + 1
+						continue
+					}
+					// 标点后若紧接字母/数字，视为单位/结构一部分（如 250MB / 12,abc / 1,234）
+					if d+1 < len(runes) && isLetterOrDigit(runes[d+1]) {
+						out = append(out, runes[spStart:d+1]...)
+						i = d + 1
+						continue
+					}
+					// 确认移除：跳过空白+数字，仅保留标点
+					out = append(out, punct)
+					i = d + 1
+					continue
+				}
+				// 非移除标点，保留原始 (空白+数字)
+				out = append(out, runes[spStart:d]...)
+				i = d
+				continue
+			}
+			// 没有数字，输出空白
+			out = append(out, runes[spStart:j]...)
+			i = j
+			continue
+		}
+		// 其它字符直接复制
+		out = append(out, runes[i])
+		i++
+	}
+	return string(out)
 }
 
 // CleanLine 清理单行内容
@@ -40,11 +111,14 @@ func (mc *MarkdownCleaner) CleanLine(line string) string {
 	// 移除URL引用
 	line = mc.urlRefRegex.ReplaceAllString(line, "")
 
+	// 先将 \\** 归一为 * （避免随后 \* -> * 产生 **）
+	line = mc.escapedDoubleStarToSingle.ReplaceAllString(line, "*")
+
 	// 修复错误的转义强调符号 \* -> *
 	line = mc.escapeStarRegex.ReplaceAllString(line, "$1")
 
-	// 移除 空格+数字 模式
-	line = mc.numberSpaceDigitsRegex.ReplaceAllString(line, " ")
+	// 精准移除句末脚注数字（空格+数字+标点）
+	line = removeFootnoteNumbers(line)
 
 	// 压缩重复空格（保持单个空格）
 	line = mc.multiSpaceRegex.ReplaceAllString(line, " ")

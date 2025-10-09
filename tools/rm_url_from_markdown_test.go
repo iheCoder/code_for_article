@@ -57,12 +57,64 @@ func TestMarkdownCleaner_CleanLine(t *testing.T) {
 			input:    "这是普通的文本内容，没有需要清理的元素。",
 			expected: "这是普通的文本内容，没有需要清理的元素。",
 		},
+		// 新增：脚注数字移除相关
+		{
+			name:     "移除句末脚注数字-英文句号",
+			input:    "这是一个示例 12.",
+			expected: "这是一个示例.",
+		},
+		{
+			name:     "移除句末脚注数字-中文句号",
+			input:    "结束 7。",
+			expected: "结束。",
+		},
+		{
+			name:     "移除句末脚注数字-括号",
+			input:    "参考 3)",
+			expected: "参考)",
+		},
+		{
+			name:     "保留版本号1.19",
+			input:    "使用 go 1.19 构建。",
+			expected: "使用 go 1.19 构建。",
+		},
+		{
+			name:     "保留多段版本号1.19.3",
+			input:    "当前版本 1.19.3 稳定。",
+			expected: "当前版本 1.19.3 稳定。",
+		},
+		{
+			name:     "保留单位数字MB",
+			input:    "需要 250MB 内存。",
+			expected: "需要 250MB 内存。",
+		},
+		{
+			name:     "保留千位逗号数字",
+			input:    "大约 1,234 个对象。",
+			expected: "大约 1,234 个对象。",
+		},
+		{
+			name:     "不移除逗号后跟字母",
+			input:    "引用 12,abc 示例。",
+			expected: "引用 12,abc 示例。",
+		},
+		{
+			name:     "移除中文分号后的脚注数字",
+			input:    "示例 9； 后续说明",
+			expected: "示例； 后续说明",
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := cleaner.CleanLine(tc.input)
 			if result != tc.expected {
+				// 打印可视化差异
+				if len(result) != len(tc.expected) || result != tc.expected {
+					// 直接报错
+					// NOTE: 这里直接输出字符串，必要时可加入 rune 级 diff
+				}
+				// 失败信息
 				t.Errorf("期望: %q, 得到: %q", tc.expected, result)
 			}
 		})
@@ -93,7 +145,9 @@ func TestURLRefRegex(t *testing.T) {
 	for _, tc := range testCases {
 		matches := cleaner.urlRefRegex.FindAllString(tc.input, -1)
 		if len(matches) != len(tc.expected) {
-			t.Errorf("期望找到%d个匹配，实际找到%d个", len(tc.expected), len(matches))
+			if len(matches) != len(tc.expected) {
+				t.Errorf("期望找到%d个匹配，实际找到%d个", len(tc.expected), len(matches))
+			}
 			continue
 		}
 
@@ -129,7 +183,9 @@ func TestEscapeStarRegex(t *testing.T) {
 	for _, tc := range testCases {
 		matches := cleaner.escapeStarRegex.FindAllString(tc.input, -1)
 		if len(matches) != len(tc.expected) {
-			t.Errorf("期望找到%d个匹配，实际找到%d个", len(tc.expected), len(matches))
+			if len(matches) != len(tc.expected) {
+				t.Errorf("期望找到%d个匹配，实际找到%d个", len(tc.expected), len(matches))
+			}
 			continue
 		}
 
