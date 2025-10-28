@@ -40,15 +40,16 @@
 
 内核在 cgroup v2 中对字段命名与分层做了系统性调整，若将 v1 的口径直接套到 v2，容易误读。下表给出常见字段的映射与语义注记：
 
-| v1 字段           | v2 字段                   | 含义与备注 |
-| ----------------- | ------------------------- | ---------- |
-| `rss`             | `anon`                    | 匿名内存字节（堆、栈等）；v1 的 `rss`≈v2 的 `anon` |
-| `cache`           | `file`                    | 文件页缓存；v2 的 `file` 含 tmpfs/共享内存，且 v2 还单列 `shmem` 为 `file` 的子集便于观测 |
-| `mapped_file`     | `file_mapped`             | mmap 映射的文件页（映射视角，非文件介质属性） |
-| `shmem`           | `shmem`（为 `file` 子集） | 共享内存页（多来自 tmpfs）；既计入 `shmem` 也计入 `file`|
-| 内核相关若干      | `kernel` 及子项           | v2 细分出 `kernel` 总量与 `kernel_stack`/`pagetables`/`slab_{reclaimable,unreclaimable}`/`sock` 等；注意 `kernel` 是总量，不能与其子项相加（会重复计数） |
+| v1 字段       | v2 字段                   | 含义与备注                                                   |
+| ------------- | ------------------------- | ------------------------------------------------------------ |
+| `rss`         | `anon`                    | 匿名内存字节（堆、栈等）；v1 的 `rss`≈v2 的 `anon`           |
+| `cache`       | `file`                    | 文件页缓存；v2 的 `file` 含 tmpfs/共享内存，且 v2 还单列 `shmem` 为 `file` 的子集便于观测 |
+| `mapped_file` | `file_mapped`             | mmap 映射的文件页（映射视角，非文件介质属性）                |
+| `shmem`       | `shmem`（为 `file` 子集） | 共享内存页（多来自 tmpfs）；既计入 `shmem` 也计入 `file`     |
+| 内核相关若干  | `kernel` 及子项           | v2 细分出 `kernel` 总量与 `kernel_stack`/`pagetables`/`slab_{reclaimable,unreclaimable}`/`sock` 等；注意 `kernel` 是总量，不能与其子项相加（会重复计数） |
 
 实务建议：
+
 - 在 v1 语境用 `rss/cache/mapped_file`；在 v2 语境优先用 `anon/file/file_mapped (+shmem)` 并结合 `kernel*` 子项观测内核成本。
 - 文章后续示例将分别给出 v1 与 v2 的读取与解读口径，避免“以 v1 度 v2”。
 
@@ -91,7 +92,7 @@
 | `active_file`   | 处于*活跃*LRU 列表上的页面缓存。最近被使用的文件。           | 规量     | 应用正在活跃读写的文件的缓存。                               |
 | `inactive_file` | 处于*不活跃*LRU 列表上的页面缓存。可被回收。                 | 规量     | 过去访问过的文件的缓存。这是内核在内存压力下首先会回收的内存。 |
 | `pgfault`       | 次要页面错误（Minor Page Faults）。                          | 计数器   | 正常事件。突增与堆增长或初次内存访问相关。                   |
-| `pgmajfault`    | 主要页面错误（Major Page Faults）。                          | 计数器   | 表明需要磁盘 I/O 来满足内存访问（例如，首次读取文件或从 swap 换入）。这是一个性能指标。 |
+| `pgmajfault`    | 主要页面错误（Major Page Faults）。                          | 计数器   | 通常表示需要磁盘 I/O（例如，首次读取文件、初次访问 mmap 映射的新区域），性能代价较高 |
 
 
 
@@ -115,15 +116,15 @@ Go 语言的内存分配器通过 `mheap`、`mcache` 和 `mspan` 等结构来管
 package main
 
 import (
-	"fmt"
-	"time"
+    "fmt"
+    "time"
 )
 
 func main() {
-	fmt.Println("Allocating 512MB on the heap...")
-	_ = make(byte, 512*1024*1024)
-	fmt.Println("Allocation complete. Sleeping for 5 minutes.")
-	time.Sleep(5 * time.Minute)
+    fmt.Println("Allocating 512MB on the heap...")
+    _ = make(byte, 512*1024*1024)
+    fmt.Println("Allocation complete. Sleeping for 5 minutes.")
+    time.Sleep(5 * time.Minute)
 }
 ```
 
@@ -166,23 +167,23 @@ inactive_anon 32768
 package main
 
 import (
-	"fmt"
-	"runtime"
-	"time"
+    "fmt"
+    "runtime"
+    "time"
 )
 
 func main() {
-	numGoroutines := 200000
-	fmt.Printf("Spawning %d goroutines...\n", numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
-		go func() {
-			time.Sleep(10 * time.Minute)
-		}()
-	}
-	runtime.Gosched()
-	fmt.Printf("Number of goroutines: %d\n", runtime.NumGoroutine())
-	fmt.Println("Sleeping for 10 minutes.")
-	time.Sleep(10 * time.Minute)
+    numGoroutines := 200000
+    fmt.Printf("Spawning %d goroutines...\n", numGoroutines)
+    for i := 0; i < numGoroutines; i++ {
+        go func() {
+            time.Sleep(10 * time.Minute)
+        }()
+    }
+    runtime.Gosched()
+    fmt.Printf("Number of goroutines: %d\n", runtime.NumGoroutine())
+    fmt.Println("Sleeping for 10 minutes.")
+    time.Sleep(10 * time.Minute)
 }
 ```
 
@@ -219,17 +220,17 @@ Go 运行时对 `madvise` 策略的选择，是性能与内存使用可观测性
 
 **表 1B: `memory.stat` 关键指标（cgroup v2）**
 
-| 指标              | 描述与注意点 | 类型 | Go 关联洞察 |
-| ----------------- | ------------ | ---- | ----------- |
-| `anon`            | 匿名内存字节 | 规量 | 堆、栈、C 分配（计入进程 RSS） |
-| `file`            | 文件页缓存（含 tmpfs/共享内存） | 规量 | 文件 I/O 的冷热结构，受 LRU 影响 |
-| `file_mapped`     | 映射的文件页 | 规量 | `mmap` 使用规模与访问足迹 |
-| `shmem`           | `file` 的子集，便于观测共享内存 | 规量 | IPC、tmpfs；注意与 `file_mapped` 维度不同 |
-| `kernel`          | 内核内存总量 | 规量 | 总量，不能与其子项相加 |
-| `kernel_stack`    | 内核栈       | 规量 | 系统调用等压力下上升 |
-| `pagetables`      | 页表         | 规量 | 线程数/映射数量上升导致增长 |
-| `slab_reclaimable`/`slab_unreclaimable` | slab 可回收/不可回收 | 规量 | 内核对象缓存，观测回收效率 |
-| `sock`            | socket 相关  | 规量 | 网络连接规模与状态关联 |
+| 指标                                    | 描述与注意点                    | 类型 | Go 关联洞察                               |
+| --------------------------------------- | ------------------------------- | ---- | ----------------------------------------- |
+| `anon`                                  | 匿名内存字节                    | 规量 | 堆、栈、C 分配（计入进程 RSS）            |
+| `file`                                  | 文件页缓存（含 tmpfs/共享内存） | 规量 | 文件 I/O 的冷热结构，受 LRU 影响          |
+| `file_mapped`                           | 映射的文件页                    | 规量 | `mmap` 使用规模与访问足迹                 |
+| `shmem`                                 | `file` 的子集，便于观测共享内存 | 规量 | IPC、tmpfs；注意与 `file_mapped` 维度不同 |
+| `kernel`                                | 内核内存总量                    | 规量 | 总量，不能与其子项相加                    |
+| `kernel_stack`                          | 内核栈                          | 规量 | 系统调用等压力下上升                      |
+| `pagetables`                            | 页表                            | 规量 | 线程数/映射数量上升导致增长               |
+| `slab_reclaimable`/`slab_unreclaimable` | slab 可回收/不可回收            | 规量 | 内核对象缓存，观测回收效率                |
+| `sock`                                  | socket 相关                     | 规量 | 网络连接规模与状态关联                    |
 
 注：v2 的 `kernel` 是总量，已涵盖子项，子项合计不可与 `kernel` 再相加。
 
@@ -255,17 +256,17 @@ void* allocate_memory() {
 */
 import "C"
 import (
-	"fmt"
-	"net/http"
-	_ "net/http/pprof"
-	"time"
+    "fmt"
+    "net/http"
+    _ "net/http/pprof"
+    "time"
 )
 
 func main() {
-	fmt.Println("Allocating 100MB via CGo...")
-	_ = C.allocate_memory()
-	fmt.Println("Allocation complete. pprof available at :6060")
-	time.Sleep(10 * time.Minute)
+    fmt.Println("Allocating 100MB via CGo...")
+    _ = C.allocate_memory()
+    fmt.Println("Allocation complete. pprof available at :6060")
+    time.Sleep(10 * time.Minute)
 }
 ```
 
@@ -291,33 +292,33 @@ Linux 页面缓存是内核利用空闲 RAM 缓存磁盘块的一种机制，它
 package main
 
 import (
-	"fmt"
-	"os"
-	"time"
+    "fmt"
+    "os"
+    "time"
 )
 
 func main() {
-	// First, create a 1GB file
-	const fileSize = 1 * 1024 * 1024 * 1024
-	const fileName = "/tmp/largefile"
-	data := make(byte, 1024)
-	file, _ := os.Create(fileName)
-	for i := 0; i < fileSize/1024; i++ {
-		file.Write(data)
-	}
-	file.Close()
-	fmt.Println("1GB file created.")
+    // First, create a 1GB file
+    const fileSize = 1 * 1024 * 1024 * 1024
+    const fileName = "/tmp/largefile"
+    data := make(byte, 1024)
+    file, _ := os.Create(fileName)
+    for i := 0; i < fileSize/1024; i++ {
+        file.Write(data)
+    }
+    file.Close()
+    fmt.Println("1GB file created.")
 
-	// Clear kernel caches to ensure a clean read from disk
-	_ = os.WriteFile("/proc/sys/vm/drop_caches",byte("3"), 0644)
-	fmt.Println("Kernel caches dropped. Reading file...")
+    // Clear kernel caches to ensure a clean read from disk
+    _ = os.WriteFile("/proc/sys/vm/drop_caches",byte("3"), 0644)
+    fmt.Println("Kernel caches dropped. Reading file...")
 
-	_, err := os.ReadFile(fileName)
-	if err!= nil {
-		panic(err)
-	}
-	fmt.Println("File read complete. Check memory.stat.")
-	time.Sleep(5 * time.Minute)
+    _, err := os.ReadFile(fileName)
+    if err!= nil {
+        panic(err)
+    }
+    fmt.Println("File read complete. Check memory.stat.")
+    time.Sleep(5 * time.Minute)
 }
 ```
 
@@ -341,32 +342,32 @@ func main() {
 package main
 
 import (
-	"fmt"
-	"log"
-	"os"
-	"time"
+    "fmt"
+    "log"
+    "os"
+    "time"
 
-	"golang.org/x/exp/mmap"
+    "golang.org/x/exp/mmap"
 )
 
 func main() {
-	// Create a 100MB file
-	const fileName = "/tmp/mmapfile"
-	_ = os.WriteFile(fileName, make(byte, 100*1024*1024), 0644)
-	
-	fmt.Println("Mapping file into memory...")
-	readerAt, err := mmap.Open(fileName)
-	if err!= nil {
-		log.Fatalf("mmap.Open: %v", err)
-	}
-	defer readerAt.Close()
+    // Create a 100MB file
+    const fileName = "/tmp/mmapfile"
+    _ = os.WriteFile(fileName, make(byte, 100*1024*1024), 0644)
+    
+    fmt.Println("Mapping file into memory...")
+    readerAt, err := mmap.Open(fileName)
+    if err!= nil {
+        log.Fatalf("mmap.Open: %v", err)
+    }
+    defer readerAt.Close()
 
-	// Access some data to ensure pages are faulted in
-	buf := make(byte, 4096)
-	readerAt.At(0, buf)
-	
-	fmt.Println("File mapped. Check memory.stat.")
-	time.Sleep(5 * time.Minute)
+    // Access some data to ensure pages are faulted in
+    buf := make(byte, 4096)
+    readerAt.At(0, buf)
+    
+    fmt.Println("File mapped. Check memory.stat.")
+    time.Sleep(5 * time.Minute)
 }
 ```
 
@@ -376,15 +377,34 @@ func main() {
 
 ### 用于 IPC 的共享内存（`shmem`）与归属口径
 
-共享内存（System V 或 POSIX 兼容）多由 `tmpfs` 这类内存文件系统承载：
-- v2 明确：`file` 包含 tmpfs/共享内存，同时单列 `shmem` 为 `file` 的子集便于观测；
-- v1 视角里常用 `mapped_file`（映射维度）来看到共享页被映射的规模。
+为了理解 `shmem` 和 `mapped_file` 的关系，让我们用一个图书馆的类比来简化概念。
 
-易混点澄清：`file_mapped`/`mapped_file` 反映“映射视角”（哪些文件页被映射进来），`shmem` 反映“介质属性”（基于 tmpfs 的共享页）。两者并非等价口径，切勿直接互推数值。
+想象一下，你的程序是图书馆里的一位读者。
 
-**代码示例 6：共享内存对 `shmem` 的影响**
+1.  **普通文件 I/O (`cache`)**: 你想看一本书（一个磁盘上的文件）。你向图书管理员（内核）申请，他会把书的*复印件*（页面缓存）给你。你读的是复印件，不是原书。这份复印件占用的空间，就记在 `cache` 上。
 
-使用 `syscall` 包创建一个 POSIX 共享内存段：
+2.  **内存映射文件 (`mapped_file`)**: 你不想通过复印件阅读，而是想获得一个能直接“透视”原书的魔法眼镜。你戴上眼镜（`mmap`），就能直接看到书架上的原书内容，无需复制。你的大脑（进程地址空间）和书（文件）之间建立了直接的视觉通道。**凡是通过这种“魔法眼镜”方式查看的内存，都会被计入 `mapped_file`**。
+
+3.  **共享内存 (`shmem`)**: 图書館里有一块特殊的公共白板 (`tmpfs`)，它不对应任何实体书，完全存在于图书馆的“想象”中（内存里）。多个读者可以同时在这块白板上写字画画，进行交流（IPC - 进程间通信）。**这块白板本身占用的空间，就是 `shmem`**。
+
+**易混点澄清：为什么使用 `shmem` 会同时增加 `mapped_file`？**
+
+现在，关键问题来了：你要如何使用那块公共白板 (`shmem`) 呢？你仍然需要用你的“魔法眼镜” (`mmap`) 去看它、在上面写字。
+
+所以，当你使用共享内存时：
+-   从**“它是什么”**（介质属性）的角度看，它是那块公共白板。因此，内核在 `shmem` 指标上为你记了一笔账。
+-   从**“你怎么用它”**（访问方式）的角度看，你正在使用“魔法眼镜”来映射它。因此，内核也在 `mapped_file` 指标上为你记了一笔账。
+
+**结论:**
+-   `shmem` 告诉你，你的程序使用了多少**基于内存的、用于共享的**内存空间（白板）。
+-   `mapped_file` 告诉你，你的程序通过**内存映射（魔法眼镜）**方式访问了多少文件内容。
+-   因为共享内存（白板）也必须通过内存映射（魔法眼镜）来访问，所以 `shmem` 的使用量**总是会**被包含在 `mapped_file` 的总量里。`shmem` 是 `mapped_file` 的一个特殊子集。
+
+在 cgroup v2 中，这种关系更清晰：`shmem` 被明确地列为 `file`（文件页缓存，更广义的“书本”类内存）的一个子集，而 `file_mapped` 则继续扮演“映射视角”的统计角色。
+
+**代码示例 6：共享内存对 `shmem` 和 `mapped_file` 的影响**
+
+下面的代码创建了一个 10MB 的 POSIX 共享内存段。当我们运行它时，可以预见到 `shmem` 和 `mapped_file` 两个指标都会相应增加。
 
 
 
@@ -392,41 +412,41 @@ func main() {
 package main
 
 import (
-	"fmt"
-	"os"
-	"syscall"
-	"time"
-	"unsafe"
+    "fmt"
+    "os"
+    "syscall"
+    "time"
+    "unsafe"
 )
 
 func main() {
-	const shmName = "/my-go-shm"
-	const shmSize = 10 * 1024 * 1024 // 10MB
+    const shmName = "/my-go-shm"
+    const shmSize = 10 * 1024 * 1024 // 10MB
 
-	// Create shared memory object
-	fd, err := syscall.ShmOpen(shmName, os.O_CREATE|os.O_RDWR, 0600)
-	if err!= nil {
-		panic(err)
-	}
-	defer syscall.ShmUnlink(shmName)
-	defer syscall.Close(fd)
+    // Create shared memory object
+    fd, err := syscall.ShmOpen(shmName, os.O_CREATE|os.O_RDWR, 0600)
+    if err!= nil {
+        panic(err)
+    }
+    defer syscall.ShmUnlink(shmName)
+    defer syscall.Close(fd)
 
-	if err := syscall.Ftruncate(fd, shmSize); err!= nil {
-		panic(err)
-	}
+    if err := syscall.Ftruncate(fd, shmSize); err!= nil {
+        panic(err)
+    }
 
-	// Map shared memory object
-	data, err := syscall.Mmap(fd, 0, shmSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
-	if err!= nil {
-		panic(err)
-	}
-	defer syscall.Munmap(data)
+    // Map shared memory object
+    data, err := syscall.Mmap(fd, 0, shmSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+    if err!= nil {
+        panic(err)
+    }
+    defer syscall.Munmap(data)
 
-	// Write to shared memory
-	copy(data,byte("Hello from shared memory!"))
-	
-	fmt.Println("Shared memory created and written. Check memory.stat.")
-	time.Sleep(5 * time.Minute)
+    // Write to shared memory
+    copy(data,byte("Hello from shared memory!"))
+    
+    fmt.Println("Shared memory created and written. Check memory.stat.")
+    time.Sleep(5 * time.Minute)
 }
 ```
 
@@ -481,12 +501,14 @@ func main() {
 仅看总量（v1: `usage_in_bytes` / v2: `memory.current`）或单看 `rss/anon` 都无法把握“可回收”与“活跃需要”。在 v2 中需特别注意：`workingset_*` 是事件计数（如 refault/activate/restore），反映冷热变化与回收效率，并非“当下工作集大小”。
 
 工程上更稳妥的做法：
+
 - 基于 LRU 粗估结构：使用 `active_{anon,file}` 与 `inactive_{anon,file}` 的相对量与变化，判断冷热页结构与回收空间；
 - 结合 PSI：读取 PSI 的 `memory.pressure`（some/full，10/60/300s 均值）评估内存争用强度；
 - 结合阈值事件：观测 `memory.events{.local}` 的 `low/high/max/oom/oom_kill`，用于告警与自愈编排；
 - 在 K8s 中启用 PSI 汇集（kubelet 支持），把 refault 速率与 PSI “full”拉长对照，识别抖动与长期瓶颈。
 
 常用口径实例：
+
 - v1 工作集近似：`container_memory_working_set_bytes = usage_in_bytes - inactive_file`；
 - v2 工作集分析：总量看 `memory.current` 与 `memory.peak`，可回收性看 `inactive_*`，压力看 PSI，效率看 `workingset_*` 事件的速率与 `memory.events` 触发。
 
@@ -506,11 +528,11 @@ OOM Killer 的触发条件不仅仅是高 `rss`，而是当需要内存时*内�
 
 **表 2: Go 内存诊断备忘单**
 
-| **memory.stat 中的现象** | **Go 应用中可能的成因**                                      | **可行步骤**                                                 |
-| ------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **memory.stat 中的现象** | **Go 应用中可能的成因**                                      | **可行步骤**                                                |
+| ------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------- |
 | `rss` 持续增长           | 1. 堆泄漏（未被引用的对象未被回收）。 2. CGo 内存泄漏（`malloc` 未 `free`）。 3. Goroutine 泄漏（栈累积）。 | 1. 使用 `pprof` 分析堆配置文件（`-diff_base`）。 2. 如果使用 CGo，使用 Valgrind 等 C 内存工具。 3. 使用 `pprof` 检查 goroutine 数量和栈跟踪。 |
 | `rss` 很高但稳定         | 1. 存在大的、长生命周期的堆。 2. `MADV_FREE` 行为（Go 1.12-1.15）保留了内存。 | 1. 优化数据结构。 2. 使用 `GODEBUG=madvdontneed=1` 测试，观察 GC 后 `rss` 是否下降。如果是，则不是泄漏。 |
-| `cache` 很高             | 大量文件 I/O（读/写大文件）。                                | 通常是良性的。如果非预期，请跟踪文件访问模式。对于不应缓存的 I/O，可考虑使用 `O_DIRECT` 49。 |
+| `cache` 很高             | 大量文件 I/O（读/写大文件）。                                | 通常是良性的。如果非预期，请跟踪文件访问模式。对于不应缓存的 I/O，可考虑使用 `O_DIRECT`。 |
 | `mapped_file` 很高       | 使用了内存映射文件（`mmap`）或共享内存（`shmem`）。          | 如果使用了这些特性，则符合预期。确保不再需要的映射被正确解除。 |
 | `pgmajfault` 速率很高    | 缺页需要 I/O 的场景（未缓存文件、`mmap` 新区域、匿名页 swap 回读）。若宿主禁用 swap，匿名页不会读盘。 | 与 I/O 指标联读（cgroup/blk），区分文件 I/O 与 swap 回读；必要时预热或扩容内存。 |
 
@@ -519,16 +541,16 @@ OOM Killer 的触发条件不仅仅是高 `rss`，而是当需要内存时*内�
 下面给出两段最小复现，便于在 v2 环境下“看见”节流、压力与 OOM：
 
 - 实验 A：`memory.high` 节流回收（不杀进程）
-  - 设置：向目标 cgroup 写入 `memory.high=<soft_limit_bytes>`；
-  - 负载：进程逐步分配内存逼近 soft limit；
-  - 观测：`memory.events{.local}` 的 `high` 增长；PSI `memory.pressure` 的 `some/full` 均值上升；`memory.current` 在 soft limit 附近波动；
-  - 结论：证明节流回收有效且不会触发 OOM。
+    - 设置：向目标 cgroup 写入 `memory.high=<soft_limit_bytes>`；
+    - 负载：进程逐步分配内存逼近 soft limit；
+    - 观测：`memory.events{.local}` 的 `high` 增长；PSI `memory.pressure` 的 `some/full` 均值上升；`memory.current` 在 soft limit 附近波动；
+    - 结论：证明节流回收有效且不会触发 OOM。
 
 - 实验 B：`memory.max` 硬限致 OOM（可配 `memory.oom.group` 组杀）
-  - 设置：`memory.max=<hard_limit_bytes>`，可选 `memory.oom.group=1`；
-  - 负载：继续分配超过 hard limit；
-  - 观测：`memory.events` 的 `max/oom/oom_kill` 计数增加；若启用组杀，则同 cgroup 内进程被一并终止；
-  - 结论：验证 OOM 行为路径及联动信号，便于线上排障与演练。
+    - 设置：`memory.max=<hard_limit_bytes>`，可选 `memory.oom.group=1`；
+    - 负载：继续分配超过 hard limit；
+    - 观测：`memory.events` 的 `max/oom/oom_kill` 计数增加；若启用组杀，则同 cgroup 内进程被一并终止；
+    - 结论：验证 OOM 行为路径及联动信号，便于线上排障与演练。
 
 
 
